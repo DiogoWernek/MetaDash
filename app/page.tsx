@@ -7,13 +7,7 @@ import { DashboardLineChart } from "@/components/dashboard/LineChart";
 import { DashboardBarChart } from "@/components/dashboard/BarChart";
 import { BreakdownTable } from "@/components/dashboard/BreakdownTable";
 import { CampaignsTable } from "@/components/dashboard/CampaignsTable";
-import type {
-  BusinessManager,
-  AdAccount,
-  DailyInsight,
-  Campaign,
-  FilterState,
-} from "@/types";
+import type { BusinessManager, AdAccount, DailyInsight, Campaign, FilterState } from "@/types";
 import { dateToString } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -24,19 +18,16 @@ export default function DashboardPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingInsights, setLoadingInsights] = useState(false);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [currentFilters, setCurrentFilters] = useState<FilterState | null>(null);
 
   useEffect(() => {
     async function loadAccounts() {
       try {
-        console.log("[page] Buscando contas...");
         const res = await fetch("/api/accounts");
         const data = await res.json();
-        console.log("[page] Contas recebidas:", {
-          bms: data.businessManagers?.length,
-          accounts: data.adAccounts?.length,
-        });
+        console.log("[page] Contas:", { bms: data.businessManagers?.length, accounts: data.adAccounts?.length });
         setBusinessManagers(data.businessManagers ?? []);
         setAdAccounts(data.adAccounts ?? []);
       } catch (err) {
@@ -49,45 +40,41 @@ export default function DashboardPage() {
   }, []);
 
   const handleFilterChange = useCallback(async (filters: FilterState) => {
-    console.log("[page] handleFilterChange chamado:", {
-      bm: filters.selectedBmId,
-      accounts: filters.selectedAccountIds,
-      from: dateToString(filters.dateRange.from),
-      to: dateToString(filters.dateRange.to),
-    });
-
     setCurrentFilters(filters);
 
-    if (filters.selectedAccountIds.length === 0) {
-      console.warn("[page] Nenhuma conta selecionada, abortando fetch de insights.");
-      return;
-    }
+    if (filters.selectedAccountIds.length === 0) return;
 
+    const params = new URLSearchParams({
+      accountIds: filters.selectedAccountIds.join(","),
+      startDate: dateToString(filters.dateRange.from),
+      endDate: dateToString(filters.dateRange.to),
+    });
+
+    // Load insights and campaigns in parallel, with independent loading states
     setLoadingInsights(true);
-    try {
-      const params = new URLSearchParams({
-        accountIds: filters.selectedAccountIds.join(","),
-        startDate: dateToString(filters.dateRange.from),
-        endDate: dateToString(filters.dateRange.to),
-      });
+    setLoadingCampaigns(true);
+    setCampaigns([]);
 
-      console.log("[page] Buscando insights:", params.toString());
-      const res = await fetch(`/api/insights?${params.toString()}`);
-      const data = await res.json();
-      console.log("[page] Insights recebidos:", {
-        insights: data.insights?.length,
-        previous: data.previousInsights?.length,
-        campaigns: data.campaigns?.length,
-      });
+    const [insightsRes, campaignsRes] = await Promise.allSettled([
+      fetch(`/api/insights?${params}`).then((r) => r.json()),
+      fetch(`/api/campaigns?${params}`).then((r) => r.json()),
+    ]);
 
+    if (insightsRes.status === "fulfilled") {
+      const data = insightsRes.value;
       setInsights(data.insights ?? []);
       setPreviousInsights(data.previousInsights ?? []);
-      setCampaigns(data.campaigns ?? []);
-    } catch (err) {
-      console.error("[page] Erro ao carregar insights:", err);
-    } finally {
-      setLoadingInsights(false);
+    } else {
+      console.error("[page] Insights error:", insightsRes.reason);
     }
+    setLoadingInsights(false);
+
+    if (campaignsRes.status === "fulfilled") {
+      setCampaigns(campaignsRes.value.campaigns ?? []);
+    } else {
+      console.error("[page] Campaigns error:", campaignsRes.reason);
+    }
+    setLoadingCampaigns(false);
   }, []);
 
   async function handleSync() {
@@ -97,9 +84,7 @@ export default function DashboardPage() {
         method: "POST",
         headers: { "x-sync-secret": process.env.NEXT_PUBLIC_SYNC_SECRET ?? "" },
       });
-      if (currentFilters) {
-        await handleFilterChange(currentFilters);
-      }
+      if (currentFilters) await handleFilterChange(currentFilters);
     } catch (err) {
       console.error("Erro ao sincronizar:", err);
     } finally {
@@ -109,10 +94,6 @@ export default function DashboardPage() {
 
   const selectedAccounts = adAccounts.filter((a) =>
     currentFilters?.selectedAccountIds.includes(a.id)
-  );
-
-  const filteredCampaigns = campaigns.filter((c) =>
-    currentFilters?.selectedAccountIds.includes(c.account_id)
   );
 
   return (
@@ -128,14 +109,12 @@ export default function DashboardPage() {
 
       <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
         <div className="space-y-6">
-          {/* KPI Cards */}
           <KpiCards
             insights={insights}
             previousInsights={previousInsights}
             loading={loadingInsights}
           />
 
-          {/* Charts row */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <DashboardLineChart
@@ -153,13 +132,12 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Breakdown Table */}
           <BreakdownTable insights={insights} loading={loadingInsights} />
 
-          {/* Campaigns Table */}
           <CampaignsTable
-            campaigns={filteredCampaigns}
-            loading={loadingInsights}
+            campaigns={campaigns}
+            loading={loadingCampaigns}
+            currentFilters={currentFilters}
           />
         </div>
       </main>

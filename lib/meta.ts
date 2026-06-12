@@ -117,6 +117,19 @@ export async function fetchCampaignInsights(
     ...params,
     timeIncrement: "all_days" as const,
     level: "campaign",
+    fields: [
+      "campaign_id",
+      "campaign_name",
+      "impressions",
+      "clicks",
+      "spend",
+      "reach",
+      "cpm",
+      "cpc",
+      "ctr",
+      "purchase_roas",
+      "actions",
+    ],
   });
 }
 
@@ -169,6 +182,39 @@ export function parseConversions(data: MetaInsightsRaw): number {
     (a) => a.action_type === "omni_purchase" || a.action_type === "purchase"
   );
   return conversions ? parseInt(conversions.value) : 0;
+}
+
+export interface MetaCampaignRaw {
+  id: string;
+  name: string;
+  status: string;
+  objective: string;
+  daily_budget?: string;
+}
+
+export async function fetchCampaignList(
+  accountId: string,
+  accessToken: string
+): Promise<MetaCampaignRaw[]> {
+  const url = `${META_API_BASE}/${accountId}/campaigns?fields=id,name,status,objective,daily_budget&limit=200&access_token=${accessToken}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.data ?? []) as MetaCampaignRaw[];
+}
+
+export function parseConversionsAll(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const relevant = actions.find(
+    (a) =>
+      a.action_type === "omni_purchase" ||
+      a.action_type === "purchase" ||
+      a.action_type === "lead" ||
+      a.action_type === "complete_registration" ||
+      a.action_type === "onsite_conversion.lead_grouped" ||
+      a.action_type === "onsite_conversion.messaging_conversation_started_7d"
+  );
+  return relevant ? parseInt(relevant.value) : 0;
 }
 
 export async function refreshLongLivedToken(

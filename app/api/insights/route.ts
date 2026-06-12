@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { InsightResponse, DailyInsight } from "@/types";
-import {
-  generateMockInsights,
-  MOCK_CAMPAIGNS,
-  MOCK_AD_ACCOUNTS,
-} from "@/lib/mock-data";
+import { generateMockInsights, MOCK_CAMPAIGNS, MOCK_AD_ACCOUNTS } from "@/lib/mock-data";
 import { isToday, getPreviousPeriod, dateToString } from "@/lib/utils";
 
 const USE_MOCK =
@@ -28,7 +24,6 @@ export async function GET(request: NextRequest) {
   }
 
   const accountIds = accountIdsParam.split(",").filter(Boolean);
-  console.log("[api/insights] accountIds:", accountIds);
 
   if (USE_MOCK) {
     return handleMock(accountIds, startDate, endDate);
@@ -37,33 +32,19 @@ export async function GET(request: NextRequest) {
   return handleReal(accountIds, startDate, endDate);
 }
 
-function handleMock(
-  accountIds: string[],
-  startDate: string,
-  endDate: string
-): NextResponse {
+function handleMock(accountIds: string[], startDate: string, endDate: string): NextResponse {
   const allInsights: DailyInsight[] = [];
-
   for (const accountId of accountIds) {
-    const insights = generateMockInsights(accountId, startDate, endDate);
-    allInsights.push(...insights);
+    allInsights.push(...generateMockInsights(accountId, startDate, endDate));
   }
 
   const startDateObj = new Date(startDate + "T00:00:00");
   const endDateObj = new Date(endDate + "T00:00:00");
-  const { from: prevFrom, to: prevTo } = getPreviousPeriod(
-    startDateObj,
-    endDateObj
-  );
+  const { from: prevFrom, to: prevTo } = getPreviousPeriod(startDateObj, endDateObj);
 
   const previousInsights: DailyInsight[] = [];
   for (const accountId of accountIds) {
-    const insights = generateMockInsights(
-      accountId,
-      dateToString(prevFrom),
-      dateToString(prevTo)
-    );
-    previousInsights.push(...insights);
+    previousInsights.push(...generateMockInsights(accountId, dateToString(prevFrom), dateToString(prevTo)));
   }
 
   const campaigns = MOCK_CAMPAIGNS.filter((c) => {
@@ -71,77 +52,54 @@ function handleMock(
     return account && accountIds.includes(account.id);
   });
 
-  const response: InsightResponse = {
-    insights: allInsights,
-    previousInsights,
-    campaigns,
-  };
-
-  return NextResponse.json(response);
+  return NextResponse.json({ insights: allInsights, previousInsights, campaigns } as InsightResponse);
 }
 
-async function handleReal(
-  accountIds: string[],
-  startDate: string,
-  endDate: string
-): Promise<NextResponse> {
+async function handleReal(accountIds: string[], startDate: string, endDate: string): Promise<NextResponse> {
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
-    const {
-      fetchInsights: fetchMetaInsights,
-      parseRoas,
-      parseConversions,
-    } = await import("@/lib/meta");
+    const { fetchInsights: fetchMetaInsights, fetchBreakdown, parseRoas, parseConversionsAll } = await import("@/lib/meta");
 
     const startDateObj = new Date(startDate + "T00:00:00");
     const endDateObj = new Date(endDate + "T00:00:00");
     const includestoday = isToday(endDate);
+    const todayStr = dateToString(new Date());
+    const { from: prevFrom, to: prevTo } = getPreviousPeriod(startDateObj, endDateObj);
 
-    const { from: prevFrom, to: prevTo } = getPreviousPeriod(
-      startDateObj,
-      endDateObj
-    );
-
-    const accountsResult = await supabaseAdmin
-      .from("ad_accounts")
-      .select("*")
-      .in("id", accountIds);
-
-    if (accountsResult.error) throw accountsResult.error;
-    const accounts = accountsResult.data ?? [];
+    const { data: accounts, error } = await supabaseAdmin.from("ad_accounts").select("*").in("id", accountIds);
+    if (error) throw error;
 
     const allInsights: DailyInsight[] = [];
     const allPrevInsights: DailyInsight[] = [];
 
-    for (const account of accounts) {
-      let historicalStart = startDate;
+    for (const account of accounts ?? []) {
+      // Historical from Supabase
       let historicalEnd = endDate;
-
       if (includestoday) {
         const yesterday = new Date(endDateObj);
         yesterday.setDate(yesterday.getDate() - 1);
         historicalEnd = dateToString(yesterday);
       }
 
-      if (historicalStart <= historicalEnd) {
+      if (startDate <= historicalEnd) {
         const { data: dbInsights } = await supabaseAdmin
           .from("daily_insights")
           .select("*")
           .eq("account_id", account.id)
-          .gte("date", historicalStart)
+          .gte("date", startDate)
           .lte("date", historicalEnd);
-
         if (dbInsights) allInsights.push(...dbInsights);
       }
 
+      // Today live from Meta API (with breakdowns in parallel)
       if (includestoday) {
-        const todayStr = dateToString(new Date());
         try {
-          const metaData = await fetchMetaInsights(
-            account.meta_account_id,
-            account.access_token,
-            { since: todayStr, until: todayStr }
-          );
+          const [metaData, platformBD, deviceBD, ageBD] = await Promise.all([
+            fetchMetaInsights(account.meta_account_id, account.access_token, { since: todayStr, until: todayStr }),
+            fetchBreakdown(account.meta_account_id, account.access_token, "publisher_platform", { since: todayStr, until: todayStr }).catch(() => []),
+            fetchBreakdown(account.meta_account_id, account.access_token, "device_platform", { since: todayStr, until: todayStr }).catch(() => []),
+            fetchBreakdown(account.meta_account_id, account.access_token, "age,gender", { since: todayStr, until: todayStr }).catch(() => []),
+          ]);
 
           for (const row of metaData) {
             allInsights.push({
@@ -156,45 +114,60 @@ async function handleReal(
               cpm: parseFloat(row.cpm ?? "0"),
               cpc: parseFloat(row.cpc ?? "0"),
               ctr: parseFloat(row.ctr ?? "0"),
-              conversions: parseConversions(row),
+              conversions: parseConversionsAll(row),
               roas: parseRoas(row),
-              breakdown_platform: [],
-              breakdown_device: [],
-              breakdown_age_gender: [],
+              breakdown_platform: platformBD.map((d) => ({
+                segment: String((d as Record<string, unknown>).publisher_platform ?? "Desconhecido"),
+                impressions: parseInt(d.impressions ?? "0"),
+                clicks: parseInt(d.clicks ?? "0"),
+                spend: parseFloat(d.spend ?? "0"),
+                ctr: parseFloat(d.ctr ?? "0"),
+                cpm: parseFloat(d.cpm ?? "0"),
+                roas: parseRoas(d),
+              })),
+              breakdown_device: deviceBD.map((d) => ({
+                segment: String((d as Record<string, unknown>).device_platform ?? "Desconhecido"),
+                impressions: parseInt(d.impressions ?? "0"),
+                clicks: parseInt(d.clicks ?? "0"),
+                spend: parseFloat(d.spend ?? "0"),
+                ctr: parseFloat(d.ctr ?? "0"),
+                cpm: parseFloat(d.cpm ?? "0"),
+                roas: parseRoas(d),
+              })),
+              breakdown_age_gender: ageBD.map((d) => {
+                const r = d as Record<string, unknown>;
+                const gender = r.gender === "male" ? "Masculino" : r.gender === "female" ? "Feminino" : String(r.gender ?? "?");
+                return {
+                  segment: `${r.age ?? "?"} • ${gender}`,
+                  impressions: parseInt(d.impressions ?? "0"),
+                  clicks: parseInt(d.clicks ?? "0"),
+                  spend: parseFloat(d.spend ?? "0"),
+                  ctr: parseFloat(d.ctr ?? "0"),
+                  cpm: parseFloat(d.cpm ?? "0"),
+                  roas: parseRoas(d),
+                };
+              }),
             });
           }
         } catch (err) {
-          console.error(`Meta API error for account ${account.id}:`, err);
+          console.error(`[insights] Meta live error for ${account.name}:`, err);
         }
       }
 
+      // Previous period from Supabase
       const { data: prevDbInsights } = await supabaseAdmin
         .from("daily_insights")
         .select("*")
         .eq("account_id", account.id)
         .gte("date", dateToString(prevFrom))
         .lte("date", dateToString(prevTo));
-
       if (prevDbInsights) allPrevInsights.push(...prevDbInsights);
     }
 
-    const { data: campaignsData } = await supabaseAdmin
-      .from("campaigns")
-      .select("*, adsets(*, ads(*))")
-      .in("account_id", accountIds);
-
-    const response: InsightResponse = {
-      insights: allInsights,
-      previousInsights: allPrevInsights,
-      campaigns: campaignsData ?? [],
-    };
-
-    return NextResponse.json(response);
+    // Campaigns are loaded separately via /api/campaigns
+    return NextResponse.json({ insights: allInsights, previousInsights: allPrevInsights, campaigns: [] } as InsightResponse);
   } catch (error) {
-    console.error("Error fetching insights:", error);
-    return NextResponse.json(
-      { error: "Falha ao carregar insights" },
-      { status: 500 }
-    );
+    console.error("[insights] Error:", error);
+    return NextResponse.json({ error: "Falha ao carregar insights" }, { status: 500 });
   }
 }

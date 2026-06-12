@@ -27,6 +27,8 @@ const DATE_PRESETS = [
   { label: "90d", value: "90d" },
 ] as const;
 
+const ALL_BMS = "__all__";
+
 export function Header({
   businessManagers,
   adAccounts,
@@ -35,62 +37,27 @@ export function Header({
   onSyncClick,
   isSyncing,
 }: HeaderProps) {
-  const [selectedBmId, setSelectedBmId] = useState<string>("");
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [selectedBmId, setSelectedBmId] = useState<string>(ALL_BMS);
   const [activePreset, setActivePreset] = useState<string>("30d");
   const [dateRange, setDateRange] = useState<DateRange>(getDateRange("30d"));
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [bmDropdownOpen, setBmDropdownOpen] = useState(false);
-  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
 
-  const filteredAccounts = adAccounts.filter(
-    (a) => !selectedBmId || a.bm_id === selectedBmId
-  );
+  // Accounts that belong to the selected BM (or all accounts if "Todas")
+  const activeAccountIds = selectedBmId === ALL_BMS
+    ? adAccounts.map((a) => a.id)
+    : adAccounts.filter((a) => a.bm_id === selectedBmId).map((a) => a.id);
 
+  // Fire filter change whenever BM selection or date changes
   useEffect(() => {
-    console.log("[Header] businessManagers mudou:", businessManagers.length, "| selectedBmId:", selectedBmId);
-    if (businessManagers.length > 0 && !selectedBmId) {
-      const firstBm = businessManagers[0];
-      console.log("[Header] Selecionando BM inicial:", firstBm.id, firstBm.name);
-      setSelectedBmId(firstBm.id);
+    if (activeAccountIds.length > 0) {
+      onFilterChange({ selectedBmId, selectedAccountIds: activeAccountIds, dateRange });
     }
-  }, [businessManagers, selectedBmId]);
-
-  useEffect(() => {
-    console.log("[Header] filteredAccounts:", filteredAccounts.length, "| selectedAccountIds:", selectedAccountIds.length);
-    if (filteredAccounts.length > 0 && selectedAccountIds.length === 0) {
-      const ids = filteredAccounts.map((a) => a.id);
-      console.log("[Header] Selecionando contas iniciais:", ids);
-      setSelectedAccountIds(ids);
-    }
-  }, [filteredAccounts, selectedAccountIds.length]);
-
-  useEffect(() => {
-    console.log("[Header] Disparando onFilterChange — contas:", selectedAccountIds.length, "| bm:", selectedBmId);
-    if (selectedAccountIds.length > 0) {
-      onFilterChange({ selectedBmId, selectedAccountIds, dateRange });
-    }
-  }, [selectedBmId, selectedAccountIds, dateRange, onFilterChange]);
+  }, [selectedBmId, dateRange, adAccounts.length, onFilterChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleBmSelect(bmId: string) {
     setSelectedBmId(bmId);
-    const accounts = adAccounts.filter((a) => a.bm_id === bmId);
-    setSelectedAccountIds(accounts.map((a) => a.id));
     setBmDropdownOpen(false);
-  }
-
-  function toggleAccount(accountId: string) {
-    setSelectedAccountIds((prev) => {
-      if (prev.includes(accountId)) {
-        if (prev.length === 1) return prev;
-        return prev.filter((id) => id !== accountId);
-      }
-      return [...prev, accountId];
-    });
-  }
-
-  function selectAllAccounts() {
-    setSelectedAccountIds(filteredAccounts.map((a) => a.id));
   }
 
   function handlePreset(preset: string) {
@@ -109,16 +76,12 @@ export function Header({
   }
 
   const selectedBm = businessManagers.find((bm) => bm.id === selectedBmId);
-  const allSelected = selectedAccountIds.length === filteredAccounts.length;
+  const bmLabel = selectedBmId === ALL_BMS ? "Todas as BMs" : (selectedBm?.name ?? "Business Manager");
 
   const dateLabel =
     activePreset !== "custom"
       ? DATE_PRESETS.find((p) => p.value === activePreset)?.label
-      : `${format(dateRange.from, "dd/MM/yy", { locale: ptBR })} – ${format(
-          dateRange.to,
-          "dd/MM/yy",
-          { locale: ptBR }
-        )}`;
+      : `${format(dateRange.from, "dd/MM/yy", { locale: ptBR })} – ${format(dateRange.to, "dd/MM/yy", { locale: ptBR })}`;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
@@ -140,18 +103,33 @@ export function Header({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 gap-1.5 text-xs font-medium min-w-0 max-w-[180px]"
+                  className="h-8 gap-1.5 text-xs font-medium min-w-0 max-w-[200px]"
+                  disabled={loading}
                 >
-                  <span className="truncate">
-                    {selectedBm?.name ?? "Business Manager"}
-                  </span>
+                  <span className="truncate">{bmLabel}</span>
                   <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64 p-1" align="start">
                 <p className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Business Managers
+                  Business Manager
                 </p>
+
+                {/* Todas as BMs */}
+                <button
+                  onClick={() => handleBmSelect(ALL_BMS)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted",
+                    selectedBmId === ALL_BMS && "text-meta-blue font-medium"
+                  )}
+                >
+                  <div className="h-1.5 w-1.5 rounded-full bg-meta-blue shrink-0" />
+                  <span className="flex-1 text-left">Todas as BMs</span>
+                  {selectedBmId === ALL_BMS && <Check className="h-3.5 w-3.5 shrink-0" />}
+                </button>
+
+                <div className="my-1 border-t border-border/50" />
+
                 {businessManagers.map((bm) => (
                   <button
                     key={bm.id}
@@ -163,80 +141,14 @@ export function Header({
                   >
                     <div className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                     <span className="flex-1 text-left truncate">{bm.name}</span>
-                    {selectedBmId === bm.id && (
-                      <Check className="h-3.5 w-3.5 shrink-0" />
-                    )}
+                    {selectedBmId === bm.id && <Check className="h-3.5 w-3.5 shrink-0" />}
                   </button>
                 ))}
-              </PopoverContent>
-            </Popover>
 
-            {/* Account Selector */}
-            <Popover open={accountDropdownOpen} onOpenChange={setAccountDropdownOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs font-medium min-w-0 max-w-[220px]"
-                >
-                  <span className="truncate">
-                    {allSelected
-                      ? "Todas as contas"
-                      : selectedAccountIds.length === 1
-                      ? filteredAccounts.find(
-                          (a) => a.id === selectedAccountIds[0]
-                        )?.name ?? "1 conta"
-                      : `${selectedAccountIds.length} contas`}
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 p-1" align="start">
-                <div className="flex items-center justify-between px-2 py-1.5">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Ad Accounts
-                  </p>
-                  <button
-                    onClick={selectAllAccounts}
-                    className="text-xs text-meta-blue hover:underline"
-                  >
-                    Todas
-                  </button>
-                </div>
-                {filteredAccounts.map((account) => {
-                  const isSelected = selectedAccountIds.includes(account.id);
-                  return (
-                    <button
-                      key={account.id}
-                      onClick={() => toggleAccount(account.id)}
-                      className={cn(
-                        "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted",
-                        isSelected && "bg-meta-blue/5"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
-                          isSelected
-                            ? "border-meta-blue bg-meta-blue"
-                            : "border-border bg-transparent"
-                        )}
-                      >
-                        {isSelected && (
-                          <Check className="h-2.5 w-2.5 text-white" />
-                        )}
-                      </div>
-                      <div className="flex flex-col items-start min-w-0">
-                        <span className="truncate font-medium text-xs">
-                          {account.name}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {account.meta_account_id}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
+                {/* Account count hint */}
+                <p className="px-2 pt-2 pb-1 text-[10px] text-muted-foreground">
+                  {activeAccountIds.length} conta{activeAccountIds.length !== 1 ? "s" : ""} ativa{activeAccountIds.length !== 1 ? "s" : ""}
+                </p>
               </PopoverContent>
             </Popover>
 
@@ -294,9 +206,7 @@ export function Header({
                 className="h-9 w-9"
                 title="Sincronizar dados"
               >
-                <RefreshCw
-                  className={cn("h-4 w-4", isSyncing && "animate-spin")}
-                />
+                <RefreshCw className={cn("h-4 w-4", isSyncing && "animate-spin")} />
               </Button>
             )}
             <ThemeToggle />

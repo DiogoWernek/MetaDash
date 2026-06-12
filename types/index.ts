@@ -54,12 +54,17 @@ export interface Campaign {
   name: string;
   status: "ACTIVE" | "PAUSED" | "ARCHIVED";
   objective: string;
+  budget?: number;
   spend: number;
   impressions: number;
   clicks: number;
   ctr: number;
   cpm: number;
+  cpc?: number;
   roas: number;
+  reach?: number;
+  conversions?: number;
+  cpa?: number;
   adsets?: AdSet[];
 }
 
@@ -73,6 +78,8 @@ export interface AdSet {
   ctr: number;
   cpm: number;
   roas: number;
+  conversions?: number;
+  cpa?: number;
   ads?: Ad[];
 }
 
@@ -86,6 +93,8 @@ export interface Ad {
   ctr: number;
   cpm: number;
   roas: number;
+  conversions?: number;
+  cpa?: number;
 }
 
 export interface InsightResponse {
@@ -105,9 +114,12 @@ export interface KpiSummary {
   clicks: number;
   ctr: number;
   cpm: number;
+  cpc: number;
   roas: number;
   reach: number;
   conversions: number;
+  cpa: number;
+  frequency: number;
 }
 
 export interface DateRange {
