@@ -36,6 +36,10 @@ export function formatRoas(value: number): string {
   );
 }
 
+export function normalizeSegment(segment: string): string {
+  return segment.replace(/\bunknown\b/gi, "Não reconhecido");
+}
+
 export function formatDate(date: string): string {
   const d = new Date(date + "T00:00:00");
   return new Intl.DateTimeFormat("pt-BR").format(d);

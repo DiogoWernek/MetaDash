@@ -9,6 +9,7 @@ import {
   ArrowUp,
   ArrowDown,
   Loader2,
+  Video,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,7 @@ import {
   cn,
 } from "@/lib/utils";
 import type { Campaign, AdSet, FilterState } from "@/types";
+import { AdDetailsModal } from "./AdDetailsModal";
 
 interface CampaignsTableProps {
   campaigns: Campaign[];
@@ -36,7 +38,10 @@ interface CampaignsTableProps {
   currentFilters?: FilterState | null;
 }
 
-type SortKey = "name" | "spend" | "budget" | "impressions" | "clicks" | "ctr" | "cpm" | "cpa" | "roas";
+type SortKey = "name" | "spend" | "budget" | "impressions" | "clicks" | "ctr" | "cpm" | "cpa" | "roas"
+  | "messaging_conversations" | "cost_per_conversation" | "cost_per_result"
+  | "leads_form" | "cost_per_lead_form" | "cost_per_thruplay" | "cost_per_landing_page_view"
+  | "post_reactions" | "post_comments" | "post_shares" | "follows" | "profile_visits";
 type SortDir = "asc" | "desc";
 type StatusFilter = "all" | "ACTIVE" | "PAUSED" | "ARCHIVED";
 
@@ -85,7 +90,12 @@ function SortButton({ column, sortKey, sortDir, onSort }: {
   );
 }
 
-function AdSetRows({ adsets, loadingAdsets }: { adsets: AdSet[]; loadingAdsets: boolean }) {
+function AdSetRows({ adsets, loadingAdsets, accountId, onAdAction }: {
+  adsets: AdSet[];
+  loadingAdsets: boolean;
+  accountId: string;
+  onAdAction: (metaAdId: string, adName: string) => void;
+}) {
   const [expandedAdSets, setExpandedAdSets] = useState<Set<string>>(new Set());
 
   function toggleAdSet(id: string) {
@@ -99,7 +109,7 @@ function AdSetRows({ adsets, loadingAdsets }: { adsets: AdSet[]; loadingAdsets: 
   if (loadingAdsets) {
     return (
       <tr>
-        <td colSpan={11} className="px-8 py-3">
+        <td colSpan={24} className="px-8 py-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Carregando conjuntos de anúncios...
@@ -119,6 +129,11 @@ function AdSetRows({ adsets, loadingAdsets }: { adsets: AdSet[]; loadingAdsets: 
               className="border-b border-border/40 bg-muted/5 cursor-pointer transition-colors hover:bg-muted/15"
               onClick={() => toggleAdSet(adset.id)}
             >
+              <td className="pl-4 pr-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
+                  <Video className="h-3.5 w-3.5" />
+                </Button>
+              </td>
               <td className="py-2 pr-3" style={{ paddingLeft: "40px" }}>
                 <div className="flex items-center gap-2">
                   {adset.ads && adset.ads.length > 0 ? (
@@ -138,9 +153,36 @@ function AdSetRows({ adsets, loadingAdsets }: { adsets: AdSet[]; loadingAdsets: 
                 <span className="font-mono text-xs">{adset.cpa ? formatCurrency(adset.cpa) : "—"}</span>
               </td>
               <td className="px-3 py-2 pr-4 text-right"><span className="font-mono text-xs">{adset.roas > 0 ? formatRoas(adset.roas) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.messaging_conversations ? formatNumber(adset.messaging_conversations) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{adset.cost_per_conversation ? formatCurrency(adset.cost_per_conversation) : "—"}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{adset.cost_per_result ? formatCurrency(adset.cost_per_result) : "—"}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.leads_form ? formatNumber(adset.leads_form) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{adset.cost_per_lead_form ? formatCurrency(adset.cost_per_lead_form) : "—"}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{adset.cost_per_thruplay ? formatCurrency(adset.cost_per_thruplay) : "—"}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{adset.cost_per_landing_page_view ? formatCurrency(adset.cost_per_landing_page_view) : "—"}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.post_reactions ? formatNumber(adset.post_reactions) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.post_comments ? formatNumber(adset.post_comments) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.post_shares ? formatNumber(adset.post_shares) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.follows ? formatNumber(adset.follows) : <span className="text-muted-foreground">—</span>}</span></td>
+              <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{adset.profile_visits ? formatNumber(adset.profile_visits) : <span className="text-muted-foreground">—</span>}</span></td>
             </tr>
             {isExpanded && adset.ads?.map((ad) => (
               <tr key={ad.id} className="border-b border-border/30 bg-muted/10 transition-colors hover:bg-muted/20">
+                <td className="pl-4 pr-2 py-2 text-center">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-meta-blue hover:bg-meta-blue/10"
+                        onClick={() => onAdAction(ad.id, ad.name)}
+                      >
+                        <Video className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="text-xs">Métricas de Vídeo &amp; Prévia do Criativo</TooltipContent>
+                  </Tooltip>
+                </td>
                 <td className="py-2 pr-3" style={{ paddingLeft: "60px" }}>
                   <div className="flex items-center gap-2">
                     <div className="h-1 w-1 rounded-full bg-muted-foreground/40 shrink-0" />
@@ -156,6 +198,18 @@ function AdSetRows({ adsets, loadingAdsets }: { adsets: AdSet[]; loadingAdsets: 
                 <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{formatCurrency(ad.cpm)}</span></td>
                 <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.cpa ? formatCurrency(ad.cpa) : "—"}</span></td>
                 <td className="px-3 py-2 pr-4 text-right"><span className="font-mono text-xs">{ad.roas > 0 ? formatRoas(ad.roas) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.messaging_conversations ? formatNumber(ad.messaging_conversations) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{ad.cost_per_conversation ? formatCurrency(ad.cost_per_conversation) : "—"}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">—</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.leads_form ? formatNumber(ad.leads_form) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{ad.cost_per_lead_form ? formatCurrency(ad.cost_per_lead_form) : "—"}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{ad.cost_per_thruplay ? formatCurrency(ad.cost_per_thruplay) : "—"}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs text-muted-foreground">{ad.cost_per_landing_page_view ? formatCurrency(ad.cost_per_landing_page_view) : "—"}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.post_reactions ? formatNumber(ad.post_reactions) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.post_comments ? formatNumber(ad.post_comments) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.post_shares ? formatNumber(ad.post_shares) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.follows ? formatNumber(ad.follows) : <span className="text-muted-foreground">—</span>}</span></td>
+                <td className="px-3 py-2 text-right"><span className="font-mono text-xs">{ad.profile_visits ? formatNumber(ad.profile_visits) : <span className="text-muted-foreground">—</span>}</span></td>
               </tr>
             ))}
           </React.Fragment>
@@ -174,13 +228,14 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [adsetCache, setAdsetCache] = useState<Record<string, AdSet[]>>({});
   const [loadingAdsets, setLoadingAdsets] = useState<Set<string>>(new Set());
+  const [selectedAd, setSelectedAd] = useState<{ metaAdId: string; adName: string; accountId: string } | null>(null);
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("desc"); }
   }
 
-  const fetchAdsets = useCallback(async (campaignId: string, accountId: string) => {
+  const fetchAdsets = useCallback(async (campaignId: string, accountId: string, objective: string) => {
     if (adsetCache[campaignId] !== undefined) return;
     if (!currentFilters) return;
 
@@ -189,6 +244,7 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
       const params = new URLSearchParams({
         campaignId,
         accountId,
+        objective,
         startDate: currentFilters.dateRange.from.toISOString().split("T")[0],
         endDate: currentFilters.dateRange.to.toISOString().split("T")[0],
       });
@@ -212,7 +268,7 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
         next.add(campaign.id);
         // Lazy-load adsets when expanding (skip for mock data that already has adsets)
         if (!campaign.adsets?.length) {
-          fetchAdsets(campaign.id, campaign.account_id);
+          fetchAdsets(campaign.id, campaign.account_id, campaign.objective);
         }
       }
       return next;
@@ -231,8 +287,8 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
       if (sortKey === "name") return a.name.localeCompare(b.name) * dir;
       if (sortKey === "budget") return ((a.budget ?? 0) - (b.budget ?? 0)) * dir;
       if (sortKey === "cpa") return ((a.cpa ?? 0) - (b.cpa ?? 0)) * dir;
-      const aVal = a[sortKey as keyof Campaign] as number;
-      const bVal = b[sortKey as keyof Campaign] as number;
+      const aVal = Number(a[sortKey as keyof Campaign] ?? 0);
+      const bVal = Number(b[sortKey as keyof Campaign] ?? 0);
       return (aVal - bVal) * dir;
     });
 
@@ -298,10 +354,13 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px]">
+                <table className="w-full min-w-[2100px]">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="py-2.5 pl-4 pr-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <th className="pl-4 pr-2 py-2.5 w-12 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Ações
+                      </th>
+                      <th className="py-2.5 pl-1 pr-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                         <div className="flex items-center gap-1">
                           Campanha
                           <SortButton column="name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -348,12 +407,84 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                           <SortButton column="roas" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                         </div>
                       </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Conversas</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Conversas Iniciadas no WhatsApp ou Messenger</TooltipContent></Tooltip>
+                          <SortButton column="messaging_conversations" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">C/Conversa</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Custo por Conversa Iniciada (WhatsApp / Messenger)</TooltipContent></Tooltip>
+                          <SortButton column="cost_per_conversation" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">C/Resultado</span></TooltipTrigger><TooltipContent side="top" className="max-w-64 text-xs">Custo por Resultado — varia pelo objetivo: Compras (Vendas), Leads (Geração de Leads), Instalações (App), Visualizações LP (Tráfego)</TooltipContent></Tooltip>
+                          <SortButton column="cost_per_result" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Leads Form.</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Leads Gerados via Formulário Nativo do Meta</TooltipContent></Tooltip>
+                          <SortButton column="leads_form" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">C/Lead Form.</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Custo por Lead via Formulário Nativo do Meta</TooltipContent></Tooltip>
+                          <SortButton column="cost_per_lead_form" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">C/ThruPlay</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Custo por ThruPlay — visualização completa do vídeo (ou até 15s se mais curto)</TooltipContent></Tooltip>
+                          <SortButton column="cost_per_thruplay" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">C/Pág. Site</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Custo por Visualização de Página do Site (rastreada pelo Pixel Meta)</TooltipContent></Tooltip>
+                          <SortButton column="cost_per_landing_page_view" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Reações</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Reações no post do anúncio (curtidas, amei, haha, etc.) atribuídas ao anúncio</TooltipContent></Tooltip>
+                          <SortButton column="post_reactions" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Comentários</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Comentários no post do anúncio atribuídos ao anúncio</TooltipContent></Tooltip>
+                          <SortButton column="post_comments" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Compartilh.</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Compartilhamentos do post do anúncio atribuídos ao anúncio</TooltipContent></Tooltip>
+                          <SortButton column="post_shares" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Seguidores</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Seguidores ganhos atribuídos ao anúncio</TooltipContent></Tooltip>
+                          <SortButton column="follows" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
+                      <th className={thClass}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip><TooltipTrigger asChild><span className="cursor-help">Vis. Perfil</span></TooltipTrigger><TooltipContent side="top" className="max-w-56 text-xs">Visitas ao Perfil do Instagram atribuídas ao anúncio</TooltipContent></Tooltip>
+                          <SortButton column="profile_visits" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                        </div>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginated.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="py-12 text-center text-sm text-muted-foreground">
+                        <td colSpan={24} className="py-12 text-center text-sm text-muted-foreground">
                           Nenhuma campanha encontrada
                         </td>
                       </tr>
@@ -370,7 +501,19 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                               className={cn("border-b border-border/60 cursor-pointer transition-colors hover:bg-muted/20", isExpanded && "bg-muted/10")}
                               onClick={() => toggleCampaign(campaign)}
                             >
-                              <td className="py-3 pl-4 pr-3">
+                              <td className="pl-4 pr-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span>
+                                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
+                                        <Video className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="text-xs">Expanda a campanha para ver anúncios</TooltipContent>
+                                </Tooltip>
+                              </td>
+                              <td className="py-3 pl-1 pr-3">
                                 <div className="flex items-center gap-2">
                                   {isExpanded
                                     ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -434,9 +577,66 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                                   </span>
                                 )}
                               </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">
+                                  {campaign.messaging_conversations ? formatNumber(campaign.messaging_conversations) : <span className="text-muted-foreground">—</span>}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm text-muted-foreground">
+                                  {campaign.cost_per_conversation ? formatCurrency(campaign.cost_per_conversation) : "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm text-muted-foreground">
+                                  {campaign.cost_per_result ? formatCurrency(campaign.cost_per_result) : "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">
+                                  {campaign.leads_form ? formatNumber(campaign.leads_form) : <span className="text-muted-foreground">—</span>}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm text-muted-foreground">
+                                  {campaign.cost_per_lead_form ? formatCurrency(campaign.cost_per_lead_form) : "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm text-muted-foreground">
+                                  {campaign.cost_per_thruplay ? formatCurrency(campaign.cost_per_thruplay) : "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm text-muted-foreground">
+                                  {campaign.cost_per_landing_page_view ? formatCurrency(campaign.cost_per_landing_page_view) : "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">{campaign.post_reactions ? formatNumber(campaign.post_reactions) : <span className="text-muted-foreground">—</span>}</span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">{campaign.post_comments ? formatNumber(campaign.post_comments) : <span className="text-muted-foreground">—</span>}</span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">{campaign.post_shares ? formatNumber(campaign.post_shares) : <span className="text-muted-foreground">—</span>}</span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">{campaign.follows ? formatNumber(campaign.follows) : <span className="text-muted-foreground">—</span>}</span>
+                              </td>
+                              <td className="px-3 py-3 text-right">
+                                <span className="font-mono text-sm">{campaign.profile_visits ? formatNumber(campaign.profile_visits) : <span className="text-muted-foreground">—</span>}</span>
+                              </td>
                             </tr>
                             {isExpanded && (
-                              <AdSetRows adsets={adsets} loadingAdsets={isLoadingAdsets} />
+                              <AdSetRows
+                                adsets={adsets}
+                                loadingAdsets={isLoadingAdsets}
+                                accountId={campaign.account_id}
+                                onAdAction={(metaAdId, adName) =>
+                                  setSelectedAd({ metaAdId, adName, accountId: campaign.account_id })
+                                }
+                              />
                             )}
                           </React.Fragment>
                         );
@@ -492,6 +692,16 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
           )}
         </CardContent>
       </Card>
+      {selectedAd && currentFilters && (
+        <AdDetailsModal
+          metaAdId={selectedAd.metaAdId}
+          adName={selectedAd.adName}
+          accountId={selectedAd.accountId}
+          startDate={currentFilters.dateRange.from.toISOString().split("T")[0]}
+          endDate={currentFilters.dateRange.to.toISOString().split("T")[0]}
+          onClose={() => setSelectedAd(null)}
+        />
+      )}
     </TooltipProvider>
   );
 }

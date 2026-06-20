@@ -7,10 +7,24 @@ const USE_MOCK =
   process.env.NEXT_PUBLIC_SUPABASE_URL.includes("<project-ref>") ||
   process.env.USE_MOCK_DATA === "true";
 
+function computeCostPerResult(
+  objective: string, spend: number,
+  convs: number, leadsForm: number, thruplay: number, lpv: number, msgConvs: number
+): number | undefined {
+  const obj = objective.toUpperCase();
+  if (obj.includes("LEAD")) return leadsForm > 0 ? spend / leadsForm : undefined;
+  if (obj === "VIDEO_VIEWS") return thruplay > 0 ? spend / thruplay : undefined;
+  if (obj === "MESSAGES") return msgConvs > 0 ? spend / msgConvs : undefined;
+  if (obj.includes("TRAFFIC")) return lpv > 0 ? spend / lpv : undefined;
+  if (obj.includes("AWARENESS")) return undefined;
+  return convs > 0 ? spend / convs : undefined;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const campaignId = searchParams.get("campaignId");
   const accountId = searchParams.get("accountId");
+  const objective = searchParams.get("objective") ?? "";
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");
 
@@ -23,18 +37,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ adsets: campaign?.adsets ?? [] });
   }
 
-  return handleReal(campaignId, accountId, startDate, endDate);
+  return handleReal(campaignId, accountId, objective, startDate, endDate);
 }
 
 async function handleReal(
   campaignId: string,
   accountId: string,
+  objective: string,
   startDate: string,
   endDate: string
 ): Promise<NextResponse> {
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
-    const { fetchAdSetInsights, fetchAdInsights, parseRoas, parseConversionsAll } = await import("@/lib/meta");
+    const { fetchAdSetInsights, fetchAdInsights, parseRoas, parseConversionsAll, parseMessagingConversations, parseLeadsForm, parseThruPlay, parseLandingPageViews, parsePostReactions, parsePostComments, parsePostShares, parseFollows, parseProfileVisits } = await import("@/lib/meta");
 
     const { data: accounts, error } = await supabaseAdmin
       .from("ad_accounts")
@@ -58,6 +73,15 @@ async function handleReal(
         const asId = String(asRaw.adset_id ?? "");
         const asSpend = parseFloat(as.spend ?? "0");
         const asConvs = parseConversionsAll(as);
+        const asMsgConvs = parseMessagingConversations(as);
+        const asLeads = parseLeadsForm(as);
+        const asThruplay = parseThruPlay(as);
+        const asLpv = parseLandingPageViews(as);
+        const asReactions = parsePostReactions(as);
+        const asComments = parsePostComments(as);
+        const asShares = parsePostShares(as);
+        const asFollows = parseFollows(as);
+        const asProfileVisits = parseProfileVisits(as);
 
         const ads: Ad[] = adInsightsData
           .filter((ad) => (ad as Record<string, unknown>).adset_id === asId)
@@ -65,6 +89,15 @@ async function handleReal(
             const adRaw = ad as Record<string, unknown>;
             const adConvs = parseConversionsAll(ad);
             const adSpend = parseFloat(ad.spend ?? "0");
+            const adMsgConvs = parseMessagingConversations(ad);
+            const adLeads = parseLeadsForm(ad);
+            const adThruplay = parseThruPlay(ad);
+            const adLpv = parseLandingPageViews(ad);
+            const adReactions = parsePostReactions(ad);
+            const adComments = parsePostComments(ad);
+            const adShares = parsePostShares(ad);
+            const adFollows = parseFollows(ad);
+            const adProfileVisits = parseProfileVisits(ad);
             return {
               id: String(adRaw.ad_id ?? `ad-${ad.ad_name}`),
               adset_id: asId,
@@ -77,6 +110,17 @@ async function handleReal(
               roas: parseRoas(ad),
               conversions: adConvs,
               cpa: adConvs > 0 ? adSpend / adConvs : undefined,
+              messaging_conversations: adMsgConvs || undefined,
+              cost_per_conversation: adMsgConvs > 0 ? adSpend / adMsgConvs : undefined,
+              leads_form: adLeads || undefined,
+              cost_per_lead_form: adLeads > 0 ? adSpend / adLeads : undefined,
+              cost_per_thruplay: adThruplay > 0 ? adSpend / adThruplay : undefined,
+              cost_per_landing_page_view: adLpv > 0 ? adSpend / adLpv : undefined,
+              post_reactions: adReactions || undefined,
+              post_comments: adComments || undefined,
+              post_shares: adShares || undefined,
+              follows: adFollows || undefined,
+              profile_visits: adProfileVisits || undefined,
             };
           });
 
@@ -92,6 +136,18 @@ async function handleReal(
           roas: parseRoas(as),
           conversions: asConvs,
           cpa: asConvs > 0 ? asSpend / asConvs : undefined,
+          messaging_conversations: asMsgConvs || undefined,
+          cost_per_conversation: asMsgConvs > 0 ? asSpend / asMsgConvs : undefined,
+          cost_per_result: computeCostPerResult(objective, asSpend, asConvs, asLeads, asThruplay, asLpv, asMsgConvs),
+          leads_form: asLeads || undefined,
+          cost_per_lead_form: asLeads > 0 ? asSpend / asLeads : undefined,
+          cost_per_thruplay: asThruplay > 0 ? asSpend / asThruplay : undefined,
+          cost_per_landing_page_view: asLpv > 0 ? asSpend / asLpv : undefined,
+          post_reactions: asReactions || undefined,
+          post_comments: asComments || undefined,
+          post_shares: asShares || undefined,
+          follows: asFollows || undefined,
+          profile_visits: asProfileVisits || undefined,
           ads,
         };
       });

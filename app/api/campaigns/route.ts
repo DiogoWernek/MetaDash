@@ -30,10 +30,23 @@ export async function GET(request: NextRequest) {
   return handleReal(accountIds, startDate, endDate);
 }
 
+function computeCostPerResult(
+  objective: string, spend: number,
+  convs: number, leadsForm: number, thruplay: number, lpv: number, msgConvs: number
+): number | undefined {
+  const obj = objective.toUpperCase();
+  if (obj.includes("LEAD")) return leadsForm > 0 ? spend / leadsForm : undefined;
+  if (obj === "VIDEO_VIEWS") return thruplay > 0 ? spend / thruplay : undefined;
+  if (obj === "MESSAGES") return msgConvs > 0 ? spend / msgConvs : undefined;
+  if (obj.includes("TRAFFIC")) return lpv > 0 ? spend / lpv : undefined;
+  if (obj.includes("AWARENESS")) return undefined;
+  return convs > 0 ? spend / convs : undefined;
+}
+
 async function handleReal(accountIds: string[], startDate: string, endDate: string): Promise<NextResponse> {
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
-    const { fetchCampaignList, fetchCampaignInsights, parseRoas, parseConversionsAll } = await import("@/lib/meta");
+    const { fetchCampaignList, fetchCampaignInsights, parseRoas, parseConversionsAll, parseMessagingConversations, parseLeadsForm, parseThruPlay, parseLandingPageViews, parsePostReactions, parsePostComments, parsePostShares, parseFollows, parseProfileVisits } = await import("@/lib/meta");
 
     const { data: accounts, error } = await supabaseAdmin.from("ad_accounts").select("*").in("id", accountIds);
     if (error) throw error;
@@ -55,6 +68,15 @@ async function handleReal(accountIds: string[], startDate: string, endDate: stri
             const ci = campInsights.find((i) => i.campaign_id === mc.id);
             const spend = parseFloat(ci?.spend ?? "0");
             const convs = parseConversionsAll(ci ?? {});
+            const msgConvs = parseMessagingConversations(ci ?? {});
+            const leadsForm = parseLeadsForm(ci ?? {});
+            const thruplay = parseThruPlay(ci ?? {});
+            const lpv = parseLandingPageViews(ci ?? {});
+            const reactions = parsePostReactions(ci ?? {});
+            const comments = parsePostComments(ci ?? {});
+            const shares = parsePostShares(ci ?? {});
+            const follows = parseFollows(ci ?? {});
+            const profileVisits = parseProfileVisits(ci ?? {});
 
             allCampaigns.push({
               id: mc.id,
@@ -71,6 +93,18 @@ async function handleReal(accountIds: string[], startDate: string, endDate: stri
               roas: parseRoas(ci ?? {}),
               conversions: convs,
               cpa: convs > 0 ? spend / convs : undefined,
+              messaging_conversations: msgConvs || undefined,
+              cost_per_conversation: msgConvs > 0 ? spend / msgConvs : undefined,
+              cost_per_result: computeCostPerResult(mc.objective, spend, convs, leadsForm, thruplay, lpv, msgConvs),
+              leads_form: leadsForm || undefined,
+              cost_per_lead_form: leadsForm > 0 ? spend / leadsForm : undefined,
+              cost_per_thruplay: thruplay > 0 ? spend / thruplay : undefined,
+              cost_per_landing_page_view: lpv > 0 ? spend / lpv : undefined,
+              post_reactions: reactions || undefined,
+              post_comments: comments || undefined,
+              post_shares: shares || undefined,
+              follows: follows || undefined,
+              profile_visits: profileVisits || undefined,
               adsets: [],
             });
           }

@@ -69,16 +69,30 @@ export async function POST(request: NextRequest) {
         const row = insights[0];
         if (!row) continue;
 
-        const mapBreakdown = (data: typeof platformBreakdown) =>
-          data.map((d) => ({
-            segment: Object.values(d).find((v) => typeof v === "string" && v !== dateStr) as string,
-            impressions: parseInt(d.impressions ?? "0"),
-            clicks: parseInt(d.clicks ?? "0"),
-            spend: parseFloat(d.spend ?? "0"),
-            ctr: parseFloat(d.ctr ?? "0"),
-            cpm: parseFloat(d.cpm ?? "0"),
-            roas: parseRoas(d),
-          }));
+        type RawRow = typeof platformBreakdown[number];
+
+        const normalize = (v: unknown) =>
+          String(v ?? "Não reconhecido").replace(/\bunknown\b/gi, "Não reconhecido");
+
+        const mapSegment = (d: RawRow, key: string) =>
+          normalize((d as Record<string, unknown>)[key]);
+
+        const mapAgeGender = (d: RawRow) => {
+          const r = d as Record<string, unknown>;
+          const gender =
+            r.gender === "male" ? "Masculino" : r.gender === "female" ? "Feminino" : normalize(r.gender);
+          return `${normalize(r.age)} • ${gender}`;
+        };
+
+        const toRow = (d: RawRow, segment: string) => ({
+          segment,
+          impressions: parseInt(d.impressions ?? "0"),
+          clicks: parseInt(d.clicks ?? "0"),
+          spend: parseFloat(d.spend ?? "0"),
+          ctr: parseFloat(d.ctr ?? "0"),
+          cpm: parseFloat(d.cpm ?? "0"),
+          roas: parseRoas(d),
+        });
 
         await supabaseAdmin.from("daily_insights").upsert(
           {
@@ -94,9 +108,15 @@ export async function POST(request: NextRequest) {
             ctr: parseFloat(row.ctr ?? "0"),
             conversions: parseConversions(row),
             roas: parseRoas(row),
-            breakdown_platform: mapBreakdown(platformBreakdown),
-            breakdown_device: mapBreakdown(deviceBreakdown),
-            breakdown_age_gender: mapBreakdown(ageGenderBreakdown),
+            breakdown_platform: platformBreakdown.map((d) =>
+              toRow(d, mapSegment(d, "publisher_platform"))
+            ),
+            breakdown_device: deviceBreakdown.map((d) =>
+              toRow(d, mapSegment(d, "device_platform"))
+            ),
+            breakdown_age_gender: ageGenderBreakdown.map((d) =>
+              toRow(d, mapAgeGender(d))
+            ),
             raw_json: row,
             synced_at: new Date().toISOString(),
           },

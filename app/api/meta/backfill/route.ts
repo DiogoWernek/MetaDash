@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const { startDate, endDate } = body as { startDate?: string; endDate?: string };
+  const { startDate, endDate, force } = body as { startDate?: string; endDate?: string; force?: boolean };
 
   if (!startDate || !endDate) {
     return NextResponse.json({ error: "startDate e endDate são obrigatórios" }, { status: 400 });
@@ -39,17 +39,18 @@ export async function POST(request: NextRequest) {
   for (const account of accounts) {
     for (const dateStr of dates) {
       try {
-        // Skip if already exists in DB
-        const { data: existing } = await supabaseAdmin
-          .from("daily_insights")
-          .select("id")
-          .eq("account_id", account.id)
-          .eq("date", dateStr)
-          .limit(1);
+        if (!force) {
+          const { data: existing } = await supabaseAdmin
+            .from("daily_insights")
+            .select("id")
+            .eq("account_id", account.id)
+            .eq("date", dateStr)
+            .limit(1);
 
-        if (existing?.length) {
-          results.push({ account: account.name, date: dateStr, status: "skip" });
-          continue;
+          if (existing?.length) {
+            results.push({ account: account.name, date: dateStr, status: "skip" });
+            continue;
+          }
         }
 
         const [mainData, platformBD, deviceBD, ageBD] = await Promise.all([
@@ -83,36 +84,21 @@ export async function POST(request: NextRequest) {
             ctr: parseFloat(row.ctr ?? "0"),
             conversions: parseConversionsAll(row),
             roas: parseRoas(row),
-            breakdown_platform: platformBD.map((d) => ({
-              segment: String((d as Record<string, unknown>).publisher_platform ?? "Desconhecido"),
-              impressions: parseInt(d.impressions ?? "0"),
-              clicks: parseInt(d.clicks ?? "0"),
-              spend: parseFloat(d.spend ?? "0"),
-              ctr: parseFloat(d.ctr ?? "0"),
-              cpm: parseFloat(d.cpm ?? "0"),
-              roas: parseRoas(d),
-            })),
-            breakdown_device: deviceBD.map((d) => ({
-              segment: String((d as Record<string, unknown>).device_platform ?? "Desconhecido"),
-              impressions: parseInt(d.impressions ?? "0"),
-              clicks: parseInt(d.clicks ?? "0"),
-              spend: parseFloat(d.spend ?? "0"),
-              ctr: parseFloat(d.ctr ?? "0"),
-              cpm: parseFloat(d.cpm ?? "0"),
-              roas: parseRoas(d),
-            })),
+            breakdown_platform: platformBD.map((d) => {
+              const r = d as Record<string, unknown>;
+              const seg = String(r.publisher_platform ?? "Não reconhecido").replace(/\bunknown\b/gi, "Não reconhecido");
+              return { segment: seg, impressions: parseInt(d.impressions ?? "0"), clicks: parseInt(d.clicks ?? "0"), spend: parseFloat(d.spend ?? "0"), ctr: parseFloat(d.ctr ?? "0"), cpm: parseFloat(d.cpm ?? "0"), roas: parseRoas(d) };
+            }),
+            breakdown_device: deviceBD.map((d) => {
+              const r = d as Record<string, unknown>;
+              const seg = String(r.device_platform ?? "Não reconhecido").replace(/\bunknown\b/gi, "Não reconhecido");
+              return { segment: seg, impressions: parseInt(d.impressions ?? "0"), clicks: parseInt(d.clicks ?? "0"), spend: parseFloat(d.spend ?? "0"), ctr: parseFloat(d.ctr ?? "0"), cpm: parseFloat(d.cpm ?? "0"), roas: parseRoas(d) };
+            }),
             breakdown_age_gender: ageBD.map((d) => {
               const r = d as Record<string, unknown>;
-              const gender = r.gender === "male" ? "Masculino" : r.gender === "female" ? "Feminino" : String(r.gender ?? "?");
-              return {
-                segment: `${r.age ?? "?"} • ${gender}`,
-                impressions: parseInt(d.impressions ?? "0"),
-                clicks: parseInt(d.clicks ?? "0"),
-                spend: parseFloat(d.spend ?? "0"),
-                ctr: parseFloat(d.ctr ?? "0"),
-                cpm: parseFloat(d.cpm ?? "0"),
-                roas: parseRoas(d),
-              };
+              const norm = (v: unknown) => String(v ?? "Não reconhecido").replace(/\bunknown\b/gi, "Não reconhecido");
+              const gender = r.gender === "male" ? "Masculino" : r.gender === "female" ? "Feminino" : norm(r.gender);
+              return { segment: `${norm(r.age)} • ${gender}`, impressions: parseInt(d.impressions ?? "0"), clicks: parseInt(d.clicks ?? "0"), spend: parseFloat(d.spend ?? "0"), ctr: parseFloat(d.ctr ?? "0"), cpm: parseFloat(d.cpm ?? "0"), roas: parseRoas(d) };
             }),
             raw_json: row,
             synced_at: new Date().toISOString(),

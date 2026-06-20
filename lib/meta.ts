@@ -262,6 +262,234 @@ export function parseConversionsAll(data: MetaInsightsRaw): number {
   return relevant ? parseInt(relevant.value) : 0;
 }
 
+export function parseMessagingConversations(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find(
+    (a) => a.action_type === "onsite_conversion.messaging_conversation_started_7d"
+  );
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parseLeadsForm(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find(
+    (a) => a.action_type === "onsite_conversion.lead_grouped" || a.action_type === "lead"
+  );
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parseThruPlay(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "video_thruplay");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parseLandingPageViews(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "landing_page_view");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parsePostReactions(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "post_reaction");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parsePostComments(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "comment");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parsePostShares(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "post");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parseFollows(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "follow");
+  return item ? parseInt(item.value) : 0;
+}
+
+export function parseProfileVisits(data: MetaInsightsRaw): number {
+  const actions = data.actions ?? [];
+  const item = actions.find((a) => a.action_type === "profile_visit");
+  return item ? parseInt(item.value) : 0;
+}
+
+export interface MetaCreativeInfo {
+  id: string;
+  name?: string;
+  thumbnail_url?: string;
+  image_url?: string;
+  video_id?: string;
+  body?: string;
+  title?: string;
+}
+
+export async function fetchAdVideoMetrics(
+  metaAdId: string,
+  accessToken: string,
+  params: { since: string; until: string }
+): Promise<MetaInsightsRaw | null> {
+  const fields = [
+    "spend",
+    "video_play_actions",
+    "video_p25_watched_actions",
+    "video_p50_watched_actions",
+    "video_p75_watched_actions",
+    "video_p100_watched_actions",
+    "video_avg_time_watched_actions",
+    "actions",
+  ].join(",");
+
+  const searchParams = new URLSearchParams({
+    access_token: accessToken,
+    fields,
+    time_range: JSON.stringify({ since: params.since, until: params.until }),
+    time_increment: "all_days",
+  });
+
+  try {
+    const response = await fetch(`${META_API_BASE}/${metaAdId}/insights?${searchParams.toString()}`);
+    if (!response.ok) return null;
+    const json: MetaApiResponse = await response.json();
+    return json.data[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAdCreative(
+  metaAdId: string,
+  accessToken: string,
+  accountId?: string
+): Promise<MetaCreativeInfo | null> {
+  try {
+    const fields = [
+      "id",
+      "name",
+      "thumbnail_url",
+      "image_url",
+      "image_hash",
+      "video_id",
+      "body",
+      "title",
+      "object_story_spec",
+    ].join(",");
+
+    const url = `${META_API_BASE}/${metaAdId}/adcreatives?fields=${fields}&access_token=${accessToken}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error("[fetchAdCreative] adcreatives failed:", await response.text());
+      return null;
+    }
+    const json = await response.json();
+    const raw = json.data?.[0];
+    console.log("[fetchAdCreative] raw creative:", JSON.stringify(raw));
+    if (!raw) return null;
+
+    const creative = raw as MetaCreativeInfo & {
+      image_hash?: string;
+      object_story_spec?: {
+        link_data?: { image_hash?: string; image_url?: string };
+        video_data?: { image_hash?: string };
+        photo_data?: { images?: Record<string, { url?: string }> };
+      };
+    };
+
+    // Try to get full-resolution image URL
+    let fullImageUrl: string | undefined = creative.image_url;
+
+    // Extract image hash from story spec if not directly available
+    const imageHash =
+      creative.image_hash ??
+      creative.object_story_spec?.link_data?.image_hash ??
+      creative.object_story_spec?.video_data?.image_hash;
+
+    console.log("[fetchAdCreative] imageHash:", imageHash, "accountId:", accountId, "existing image_url:", fullImageUrl);
+
+    if (imageHash && accountId) {
+      try {
+        // Meta adimages API: hashes must be passed as hashes[0]=VALUE
+        const hashParams = new URLSearchParams({
+          "hashes[0]": imageHash,
+          fields: "url,width,height",
+          access_token: accessToken,
+        });
+        const imgRes = await fetch(`${META_API_BASE}/${accountId}/adimages?${hashParams}`);
+        const imgJson = await imgRes.json();
+        console.log("[fetchAdCreative] adimages response:", JSON.stringify(imgJson));
+        if (imgRes.ok) {
+          // Response is an object keyed by hash, not an array
+          const imgData = imgJson.data
+            ? imgJson.data[0]
+            : imgJson[imageHash];
+          const imgUrl = imgData?.url ?? imgData?.url_128;
+          if (imgUrl) fullImageUrl = imgUrl;
+        }
+      } catch (e) {
+        console.error("[fetchAdCreative] adimages error:", e);
+      }
+    }
+
+    // Fetch high-res thumbnail via creative object (supports thumbnail_width/height params)
+    let betterThumbnail: string | undefined = creative.thumbnail_url;
+    try {
+      const hiResParams = new URLSearchParams({
+        fields: "thumbnail_url",
+        thumbnail_width: "1080",
+        thumbnail_height: "1080",
+        access_token: accessToken,
+      });
+      const hiResRes = await fetch(`${META_API_BASE}/${creative.id}?${hiResParams}`);
+      const hiResJson = await hiResRes.json();
+      console.log("[fetchAdCreative] hi-res thumbnail response:", JSON.stringify(hiResJson));
+      if (hiResRes.ok && hiResJson.thumbnail_url) {
+        betterThumbnail = hiResJson.thumbnail_url;
+      }
+    } catch (e) {
+      console.error("[fetchAdCreative] hi-res thumbnail error:", e);
+    }
+
+    // For video creatives, also try the video thumbnails endpoint for even better quality
+    if (creative.video_id) {
+      try {
+        const vidRes = await fetch(
+          `${META_API_BASE}/${creative.video_id}?fields=thumbnails{uri,width,height}&access_token=${accessToken}`
+        );
+        const vidJson = await vidRes.json();
+        console.log("[fetchAdCreative] video thumbnails:", JSON.stringify(vidJson));
+        if (vidRes.ok) {
+          const thumbs: Array<{ uri: string; width: number; height: number }> =
+            vidJson.thumbnails?.data ?? [];
+          if (thumbs.length > 0) {
+            const largest = thumbs.reduce((a, b) => (b.width > a.width ? b : a));
+            betterThumbnail = largest.uri;
+          }
+        }
+      } catch (e) {
+        console.error("[fetchAdCreative] video thumbnails error:", e);
+      }
+    }
+
+    return {
+      id: creative.id,
+      name: creative.name,
+      thumbnail_url: betterThumbnail,
+      image_url: fullImageUrl,
+      video_id: creative.video_id,
+      body: creative.body,
+      title: creative.title,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function refreshLongLivedToken(
   shortLivedToken: string
 ): Promise<string> {

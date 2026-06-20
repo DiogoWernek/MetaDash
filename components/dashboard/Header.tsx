@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CalendarIcon, ChevronDown, RefreshCw, Check, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { CalendarIcon, ChevronDown, RefreshCw, Check, ArrowRight, Bot } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -102,7 +103,7 @@ export function Header({
   }
 
   const selectedBm = businessManagers.find((bm) => bm.id === selectedBmId);
-  const bmLabel = selectedBmId === ALL_BMS ? "Todas as BMs" : (selectedBm?.name ?? "Business Manager");
+  const bmLabel = selectedBmId === ALL_BMS ? "Todas as Contas" : (selectedBm?.name ?? "Business Manager");
 
   const dateLabel =
     activePreset !== "custom"
@@ -150,7 +151,7 @@ export function Header({
                   )}
                 >
                   <div className="h-1.5 w-1.5 rounded-full bg-meta-blue shrink-0" />
-                  <span className="flex-1 text-left">Todas as BMs</span>
+                  <span className="flex-1 text-left">Todas as Contas</span>
                   {selectedBmId === ALL_BMS && <Check className="h-3.5 w-3.5 shrink-0" />}
                 </button>
 
@@ -327,6 +328,17 @@ export function Header({
               </Button>
             )}
             <ThemeToggle />
+            <Link href="/agente">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs font-medium border-meta-blue/30 text-meta-blue hover:bg-meta-blue hover:text-white hover:border-meta-blue transition-all"
+                title="Agente de criação de anúncios"
+              >
+                <Bot className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Criar Anúncio</span>
+              </Button>
+            </Link>
           </div>
         </div>
       </div>

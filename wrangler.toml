@@ -8,5 +8,5 @@ binding = "ASSETS"
 directory = ".open-next/assets"
 
 [vars]
-NEXT_PUBLIC_SUPABASE_URL = "https://<project-ref>.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY = "<anon-key>"
+NEXT_PUBLIC_SUPABASE_URL = "https://vafmwtlcubnawunckplr.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZhZm13dGxjdWJuYXd1bmNrcGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc2NzM2NDQsImV4cCI6MjA2MzI0OTY0NH0.rzE3V-iIR8dzqKTarIsftCGWp5y8lC5HIhHNSCE0CqU"

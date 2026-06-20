@@ -65,6 +65,18 @@ export interface Campaign {
   reach?: number;
   conversions?: number;
   cpa?: number;
+  messaging_conversations?: number;
+  cost_per_conversation?: number;
+  cost_per_result?: number;
+  leads_form?: number;
+  cost_per_lead_form?: number;
+  cost_per_thruplay?: number;
+  cost_per_landing_page_view?: number;
+  post_reactions?: number;
+  post_comments?: number;
+  post_shares?: number;
+  follows?: number;
+  profile_visits?: number;
   adsets?: AdSet[];
 }
 
@@ -80,6 +92,18 @@ export interface AdSet {
   roas: number;
   conversions?: number;
   cpa?: number;
+  messaging_conversations?: number;
+  cost_per_conversation?: number;
+  cost_per_result?: number;
+  leads_form?: number;
+  cost_per_lead_form?: number;
+  cost_per_thruplay?: number;
+  cost_per_landing_page_view?: number;
+  post_reactions?: number;
+  post_comments?: number;
+  post_shares?: number;
+  follows?: number;
+  profile_visits?: number;
   ads?: Ad[];
 }
 
@@ -95,6 +119,17 @@ export interface Ad {
   roas: number;
   conversions?: number;
   cpa?: number;
+  messaging_conversations?: number;
+  cost_per_conversation?: number;
+  leads_form?: number;
+  cost_per_lead_form?: number;
+  cost_per_thruplay?: number;
+  cost_per_landing_page_view?: number;
+  post_reactions?: number;
+  post_comments?: number;
+  post_shares?: number;
+  follows?: number;
+  profile_visits?: number;
 }
 
 export interface InsightResponse {
@@ -140,4 +175,162 @@ export interface FilterState {
   selectedBmId: string;
   selectedAccountIds: string[];
   dateRange: DateRange;
+}
+
+// ── Agente ───────────────────────────────────────────────────────────────────
+
+export type AdObjective =
+  | "OUTCOME_TRAFFIC"
+  | "OUTCOME_LEADS"
+  | "OUTCOME_SALES"
+  | "OUTCOME_AWARENESS"
+  | "OUTCOME_ENGAGEMENT";
+
+export type AdCta =
+  | "LEARN_MORE"
+  | "SHOP_NOW"
+  | "SIGN_UP"
+  | "CONTACT_US"
+  | "BOOK_NOW"
+  | "GET_QUOTE";
+
+export interface AgentFormData {
+  bm_id: string;
+  account_ids: string[];   // uma ou mais contas selecionadas
+  facebook_page_id?: string;
+  campaign_name: string;
+  objective: AdObjective;
+  budget_type: "daily" | "total";
+  budget_amount: number;
+  start_date: string;
+  end_date?: string;
+  audience_description: string;
+  locations: string;
+  age_min: number;
+  age_max: number;
+  genders: string[];
+  headline: string;
+  primary_text: string;
+  description: string;
+  cta: AdCta;
+  destination_url: string;
+  placements: "automatic" | "manual";
+  manual_placements: string[];
+}
+
+export interface AgentRun {
+  id: string;
+  account_id: string | null;
+  form_data: AgentFormData;
+  image_url: string | null;
+  image_hash: string | null;
+  meta_campaign_id: string | null;
+  meta_adset_id: string | null;
+  meta_creative_id: string | null;
+  meta_ad_id: string | null;
+  agent_messages: string[];
+  status: "pending" | "running" | "success" | "failed" | "partial";
+  error_log: string | null;
+  started_at: string;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export type AgentStreamEventType = "text" | "tool_start" | "tool_done" | "done" | "error";
+
+export interface AgentStreamEvent {
+  type: AgentStreamEventType;
+  content?: string;
+  name?: string;
+  id?: string;
+  runId?: string;
+  message?: string;
+}
+
+export interface ChatMessage {
+  type: "text" | "tool" | "error";
+  content?: string;
+  toolName?: string;
+  toolStatus?: "running" | "done";
+}
+
+// ── Ad Plan (gerado pelo Claude antes de criar) ──────────────────────────────
+
+export interface AdPlanCampaign {
+  name: string;
+  objective: string;
+  special_ad_categories: string[];
+}
+
+export interface AdPlanInterest {
+  name: string;
+  keyword: string;
+}
+
+export interface AdPlanTargeting {
+  geo_locations: { countries: string[]; cities?: Array<{ name: string }> };
+  age_min: number;
+  age_max: number;
+  genders: number[];
+  interests: AdPlanInterest[];
+  publisher_platforms?: string[];
+  facebook_positions?: string[];
+  instagram_positions?: string[];
+}
+
+export interface AdPlanAdset {
+  name: string;
+  daily_budget?: number;
+  lifetime_budget?: number;
+  start_time: string;
+  end_time?: string;
+  optimization_goal: string;
+  billing_event: string;
+  targeting: AdPlanTargeting;
+}
+
+export interface AdPlanCreative {
+  name: string;
+  title: string;
+  body: string;
+  description: string;
+  call_to_action_type: string;
+  link: string;
+  page_id: string;
+}
+
+export interface AdPlan {
+  summary: string;
+  campaign: AdPlanCampaign;
+  adset: AdPlanAdset;
+  creative: AdPlanCreative;
+}
+
+export interface ExecuteStep {
+  step: string;
+  status: "start" | "done" | "error";
+  label: string;
+  value?: string;
+}
+
+export interface ExecuteStreamEvent {
+  type: "step" | "done" | "error" | "account_start";
+  step?: string;
+  status?: "start" | "done" | "error";
+  label?: string;
+  value?: string;
+  account_id?: string;
+  account_name?: string;
+  result?: ExecuteResult;
+  results?: ExecuteResult[];
+  message?: string;
+}
+
+export interface ExecuteResult {
+  account_id: string;
+  account_name: string;
+  campaign_id: string;
+  adset_id: string;
+  creative_id: string;
+  ad_id: string;
 }

@@ -9,6 +9,7 @@ import {
   formatCurrency,
   formatPercent,
   formatRoas,
+  normalizeSegment,
 } from "@/lib/utils";
 import type { DailyInsight, BreakdownItem } from "@/types";
 
@@ -25,13 +26,14 @@ function aggregateBreakdown(
 
   for (const insight of insights) {
     for (const item of insight[field]) {
-      const existing = map.get(item.segment);
+      const segment = normalizeSegment(item.segment);
+      const existing = map.get(segment);
       if (existing) {
         existing.impressions += item.impressions;
         existing.clicks += item.clicks;
         existing.spend += item.spend;
       } else {
-        map.set(item.segment, { ...item });
+        map.set(segment, { ...item, segment });
       }
     }
   }
