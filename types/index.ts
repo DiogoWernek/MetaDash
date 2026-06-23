@@ -85,6 +85,7 @@ export interface AdSet {
   id: string;
   campaign_id: string;
   name: string;
+  status?: "ACTIVE" | "PAUSED" | "ARCHIVED";
   spend: number;
   impressions: number;
   clicks: number;
@@ -112,6 +113,7 @@ export interface Ad {
   id: string;
   adset_id: string;
   name: string;
+  status?: "ACTIVE" | "PAUSED" | "ARCHIVED";
   spend: number;
   impressions: number;
   clicks: number;
@@ -193,6 +195,35 @@ export interface GeoData {
   africa: GeoDataItem[];
 }
 
+export interface AiAnalysisData {
+  type: "campanha" | "conjunto" | "anuncio";
+  name: string;
+  status?: string;
+  objective?: string;
+  budget?: number;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpm: number;
+  roas?: number;
+  cpa?: number | null;
+  resultado?: number | null;
+  custo_resultado?: number | null;
+  conversions?: number;
+  messaging_conversations?: number;
+  cost_per_conversation?: number;
+  leads_form?: number;
+  cost_per_lead_form?: number;
+  cost_per_thruplay?: number;
+  cost_per_landing_page_view?: number;
+  post_reactions?: number;
+  post_comments?: number;
+  post_shares?: number;
+  follows?: number;
+  profile_visits?: number;
+}
+
 // ── Agente ───────────────────────────────────────────────────────────────────
 
 export type AdObjective =
@@ -210,28 +241,43 @@ export type AdCta =
   | "BOOK_NOW"
   | "GET_QUOTE";
 
-export interface AgentFormData {
-  bm_id: string;
-  account_ids: string[];   // uma ou mais contas selecionadas
-  facebook_page_id?: string;
-  campaign_name: string;
-  objective: AdObjective;
-  budget_type: "daily" | "total";
-  budget_amount: number;
-  start_date: string;
-  end_date?: string;
+export interface AudienceImage {
+  url: string;       // URL pública (Supabase) usada na criação
+  preview: string;   // URL para exibição no preview
+}
+
+// Um público-alvo conectado ao seu criativo (com uma ou mais imagens = carrossel)
+export interface AudienceCreative {
+  id: string;                 // uid client-side para keys do React
+  // Público
   audience_description: string;
   locations: string;
   age_min: number;
   age_max: number;
   genders: string[];
+  // Criativo (copy compartilhada entre as imagens/cartões)
   headline: string;
   primary_text: string;
   description: string;
   cta: AdCta;
   destination_url: string;
+  // Imagens — 1 = imagem única, 2+ = carrossel
+  images: AudienceImage[];
+}
+
+export interface AgentFormData {
+  bm_id: string;
+  account_ids: string[];   // uma conta selecionada
+  facebook_page_id?: string;
+  campaign_name: string;
+  objective: AdObjective;
+  budget_type: "daily" | "total";
+  budget_amount: number;   // orçamento da campanha (CBO)
+  start_date: string;
+  end_date?: string;
   placements: "automatic" | "manual";
   manual_placements: string[];
+  audiences: AudienceCreative[];
 }
 
 export interface AgentRun {
@@ -276,6 +322,9 @@ export interface AdPlanCampaign {
   name: string;
   objective: string;
   special_ad_categories: string[];
+  // Orçamento no nível da campanha (CBO) — em centavos
+  daily_budget?: number;
+  lifetime_budget?: number;
 }
 
 export interface AdPlanInterest {
@@ -294,17 +343,6 @@ export interface AdPlanTargeting {
   instagram_positions?: string[];
 }
 
-export interface AdPlanAdset {
-  name: string;
-  daily_budget?: number;
-  lifetime_budget?: number;
-  start_time: string;
-  end_time?: string;
-  optimization_goal: string;
-  billing_event: string;
-  targeting: AdPlanTargeting;
-}
-
 export interface AdPlanCreative {
   name: string;
   title: string;
@@ -313,13 +351,23 @@ export interface AdPlanCreative {
   call_to_action_type: string;
   link: string;
   page_id: string;
+  image_urls: string[];   // 1 = imagem única, 2+ = carrossel
+}
+
+export interface AdPlanAdset {
+  name: string;
+  start_time: string;
+  end_time?: string;
+  optimization_goal: string;
+  billing_event: string;
+  targeting: AdPlanTargeting;
+  creative: AdPlanCreative;   // cada público tem seu próprio criativo
 }
 
 export interface AdPlan {
   summary: string;
   campaign: AdPlanCampaign;
-  adset: AdPlanAdset;
-  creative: AdPlanCreative;
+  adsets: AdPlanAdset[];      // um conjunto por público
 }
 
 export interface ExecuteStep {
@@ -330,23 +378,27 @@ export interface ExecuteStep {
 }
 
 export interface ExecuteStreamEvent {
-  type: "step" | "done" | "error" | "account_start";
+  type: "step" | "done" | "error" | "campaign_start" | "group_start";
   step?: string;
   status?: "start" | "done" | "error";
   label?: string;
   value?: string;
-  account_id?: string;
-  account_name?: string;
+  group_id?: string;     // id do público (adset) a que o passo pertence
+  group_name?: string;
   result?: ExecuteResult;
-  results?: ExecuteResult[];
   message?: string;
+}
+
+export interface ExecuteAdsetResult {
+  name: string;
+  adset_id: string;
+  creative_id: string;
+  ad_id: string;
 }
 
 export interface ExecuteResult {
   account_id: string;
   account_name: string;
   campaign_id: string;
-  adset_id: string;
-  creative_id: string;
-  ad_id: string;
+  adsets: ExecuteAdsetResult[];
 }

@@ -54,29 +54,47 @@ export async function searchInterests(
 }
 
 // Create campaign → returns campaign_id
+// Com CBO: o orçamento fica na campanha e a Meta distribui entre os adsets.
 export async function createCampaign(
   accountId: string,
   token: string,
-  params: { name: string; objective: string; special_ad_categories: string[] }
+  params: {
+    name: string;
+    objective: string;
+    special_ad_categories: string[];
+    daily_budget?: number;
+    lifetime_budget?: number;
+  }
 ): Promise<string> {
-  const res = await metaPost(`${accountId}/campaigns`, token, {
-    ...params,
+  const body: Record<string, unknown> = {
+    name: params.name,
+    objective: params.objective,
+    special_ad_categories: params.special_ad_categories,
     status: "PAUSED",
-  });
+  };
+
+  if (params.daily_budget) {
+    body.daily_budget = params.daily_budget;
+    body.bid_strategy = "LOWEST_COST_WITHOUT_CAP";
+  } else if (params.lifetime_budget) {
+    body.lifetime_budget = params.lifetime_budget;
+    body.bid_strategy = "LOWEST_COST_WITHOUT_CAP";
+  }
+
+  const res = await metaPost(`${accountId}/campaigns`, token, body);
   const id = res.id as string | undefined;
   if (!id) throw new Error("campaign_id não retornado");
   return id;
 }
 
 // Create adset → returns adset_id
+// CBO: o orçamento está na campanha, então o adset NÃO recebe budget nem bid_strategy.
 export async function createAdset(
   accountId: string,
   token: string,
   campaignId: string,
   params: {
     name: string;
-    daily_budget?: number;
-    lifetime_budget?: number;
     start_time: string;
     end_time?: string | null;
     optimization_goal: string;
@@ -115,17 +133,12 @@ export async function createAdset(
     campaign_id: campaignId,
     billing_event: params.billing_event,
     optimization_goal: params.optimization_goal,
-    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
     targeting,
     start_time: params.start_time,
     status: "PAUSED",
   };
 
-  if (params.daily_budget) body.daily_budget = params.daily_budget;
-  if (params.lifetime_budget) {
-    body.lifetime_budget = params.lifetime_budget;
-    if (params.end_time) body.end_time = params.end_time;
-  }
+  if (params.end_time) body.end_time = params.end_time;
 
   const res = await metaPost(`${accountId}/adsets`, token, body);
   const id = res.id as string | undefined;
@@ -134,13 +147,15 @@ export async function createAdset(
 }
 
 // Create ad creative → returns creative_id
+// 1 imagem  → criativo de imagem única
+// 2+ imagens → criativo em carrossel (child_attachments), copy compartilhada entre os cartões
 export async function createAdCreative(
   accountId: string,
   token: string,
   params: {
     name: string;
     page_id: string;
-    image_hash: string;
+    image_hashes: string[];
     title: string;
     body: string;
     description: string;
@@ -148,21 +163,45 @@ export async function createAdCreative(
     link: string;
   }
 ): Promise<string> {
+  const callToAction = {
+    type: params.call_to_action_type,
+    value: { link: params.link },
+  };
+
+  let linkData: Record<string, unknown>;
+
+  if (params.image_hashes.length > 1) {
+    // Carrossel
+    linkData = {
+      link: params.link,
+      message: params.body,
+      multi_share_optimized: true,
+      multi_share_end_card: false,
+      child_attachments: params.image_hashes.map((hash) => ({
+        link: params.link,
+        image_hash: hash,
+        name: params.title,
+        description: params.description,
+        call_to_action: callToAction,
+      })),
+    };
+  } else {
+    // Imagem única
+    linkData = {
+      image_hash: params.image_hashes[0],
+      link: params.link,
+      message: params.body,
+      name: params.title,
+      description: params.description,
+      call_to_action: callToAction,
+    };
+  }
+
   const res = await metaPost(`${accountId}/adcreatives`, token, {
     name: params.name,
     object_story_spec: {
       page_id: params.page_id,
-      link_data: {
-        image_hash: params.image_hash,
-        link: params.link,
-        message: params.body,
-        name: params.title,
-        description: params.description,
-        call_to_action: {
-          type: params.call_to_action_type,
-          value: { link: params.link },
-        },
-      },
+      link_data: linkData,
     },
   });
   const id = res.id as string | undefined;

@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import {
-  Building2, Megaphone, Users, Image, LayoutGrid,
+  Building2, Megaphone, Users, LayoutGrid,
   ChevronDown, ChevronUp, Send, AlertCircle, Upload, Wand2, X as XIcon,
+  Plus, Trash2, Images,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,15 +12,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { ImageUpload } from "./ImageUpload";
 import { ImageGenerator } from "./ImageGenerator";
 import { cn } from "@/lib/utils";
-import type { BusinessManager, AdAccount, AgentFormData } from "@/types";
+import type { BusinessManager, AdAccount, AgentFormData, AudienceCreative, AudienceImage } from "@/types";
 
 interface AgentFormProps {
   businessManagers: BusinessManager[];
   adAccounts: AdAccount[];
-  onSubmit: (formData: AgentFormData, imageUrl: string, imagePreview: string) => void;
+  onSubmit: (formData: AgentFormData) => void;
   disabled?: boolean;
 }
 
@@ -50,6 +52,32 @@ const MANUAL_PLACEMENT_OPTIONS = [
   { value: "facebook_marketplace", label: "Marketplace" },
 ];
 
+// id determinístico (evita mismatch de hidratação)
+let _uid = 0;
+const uid = () => `aud-${++_uid}`;
+
+function makeAudience(): AudienceCreative {
+  return {
+    id: uid(),
+    audience_description: "",
+    locations: "Brasil",
+    age_min: 18,
+    age_max: 65,
+    genders: ["all"],
+    headline: "",
+    primary_text: "",
+    description: "",
+    cta: "LEARN_MORE",
+    destination_url: "",
+    images: [],
+  };
+}
+
+function nowLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T00:00`;
+}
+
 const defaultForm: AgentFormData = {
   bm_id: "",
   account_ids: [],
@@ -58,20 +86,11 @@ const defaultForm: AgentFormData = {
   objective: "OUTCOME_TRAFFIC",
   budget_type: "daily",
   budget_amount: 50,
-  start_date: new Date().toISOString().split("T")[0],
+  start_date: nowLocal(),
   end_date: "",
-  audience_description: "",
-  locations: "Brasil",
-  age_min: 18,
-  age_max: 65,
-  genders: ["all"],
-  headline: "",
-  primary_text: "",
-  description: "",
-  cta: "LEARN_MORE",
-  destination_url: "",
   placements: "automatic",
   manual_placements: [],
+  audiences: [makeAudience()],
 };
 
 interface SectionProps {
@@ -135,53 +154,334 @@ function FieldRow({ label, children, hint, required }: { label: string; children
   );
 }
 
-function buildImagePrompt(form: AgentFormData): string {
+function buildImagePrompt(a: AudienceCreative, campaignName: string): string {
   const parts = [
-    form.headline && `"${form.headline}"`,
-    form.campaign_name && `campanha: ${form.campaign_name}`,
-    form.primary_text && form.primary_text.slice(0, 80),
-    form.audience_description && form.audience_description.slice(0, 60),
+    a.headline && `"${a.headline}"`,
+    campaignName && `campanha: ${campaignName}`,
+    a.primary_text && a.primary_text.slice(0, 80),
+    a.audience_description && a.audience_description.slice(0, 60),
   ].filter(Boolean);
   if (parts.length === 0) return "";
   return `Foto profissional para anúncio de mídia social: ${parts.join(". ")}. Fundo limpo e moderno, sem texto na imagem, fotorrealista, iluminação de estúdio.`;
 }
 
+// ── Subcard de Público + Criativo ──────────────────────────────────────────────
+
+interface AudienceCardProps {
+  audience: AudienceCreative;
+  index: number;
+  total: number;
+  campaignName: string;
+  attempted: boolean;
+  disabled?: boolean;
+  onChange: (partial: Partial<AudienceCreative>) => void;
+  onRemove: () => void;
+  onAddImage: (img: AudienceImage) => void;
+  onRemoveImage: (imgIndex: number) => void;
+}
+
+function AudienceCard({
+  audience, index, total, campaignName, attempted, disabled,
+  onChange, onRemove, onAddImage, onRemoveImage,
+}: AudienceCardProps) {
+  const [imageMode, setImageMode] = useState<"upload" | "generate">("upload");
+  const a = audience;
+  const err = (cond: boolean) => attempted && cond;
+
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+      {/* Header do público */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-meta-blue/10 text-meta-blue text-xs font-bold">
+            {index + 1}
+          </div>
+          <span className="text-sm font-semibold">Público {index + 1}</span>
+          {a.images.length > 0 && (
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <Images className="h-2.5 w-2.5" />
+              {a.images.length > 1 ? `Carrossel · ${a.images.length}` : "Imagem única"}
+            </Badge>
+          )}
+        </div>
+        {total > 1 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onRemove}
+            disabled={disabled}
+            title="Remover público"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {/* ── Público ── */}
+      <FieldRow
+        label="Descrição do Público"
+        required
+        hint="Descreva em português. O agente converte para o targeting da Meta."
+      >
+        <Textarea
+          value={a.audience_description}
+          onChange={(e) => onChange({ audience_description: e.target.value })}
+          placeholder="Ex: Mulheres de 25 a 40 anos interessadas em moda e beleza"
+          rows={2}
+          className={cn("text-sm", err(!a.audience_description.trim()) && "border-destructive")}
+        />
+      </FieldRow>
+
+      <FieldRow label="Localização" required hint="Cidades, estados ou países separados por vírgula">
+        <Input
+          value={a.locations}
+          onChange={(e) => onChange({ locations: e.target.value })}
+          placeholder="Ex: São Paulo, Rio de Janeiro"
+          className={cn("h-9 text-sm", err(!a.locations.trim()) && "border-destructive")}
+        />
+      </FieldRow>
+
+      <div className="grid grid-cols-3 gap-2">
+        <FieldRow label="Idade Mín.">
+          <Input
+            type="number" min={13} max={65}
+            value={a.age_min}
+            onChange={(e) => onChange({ age_min: parseInt(e.target.value) || 18 })}
+            className="h-9 text-sm"
+          />
+        </FieldRow>
+        <FieldRow label="Idade Máx.">
+          <Input
+            type="number" min={a.age_min} max={65}
+            value={a.age_max}
+            onChange={(e) => onChange({ age_max: parseInt(e.target.value) || 65 })}
+            className="h-9 text-sm"
+          />
+        </FieldRow>
+        <FieldRow label="Gênero">
+          <div className="flex items-center gap-2 h-9">
+            {[
+              { value: "all", label: "Todos" },
+              { value: "male", label: "M" },
+              { value: "female", label: "F" },
+            ].map((g) => (
+              <label key={g.value} className="flex items-center gap-1 cursor-pointer">
+                <Checkbox
+                  checked={g.value === "all" ? a.genders.includes("all") : (a.genders.includes(g.value) && !a.genders.includes("all"))}
+                  onCheckedChange={(checked) => {
+                    if (g.value === "all") {
+                      onChange({ genders: checked ? ["all"] : [] });
+                    } else {
+                      const current = a.genders.filter((v) => v !== "all");
+                      onChange({ genders: checked ? [...current, g.value] : current.filter((v) => v !== g.value) });
+                    }
+                  }}
+                />
+                <span className="text-xs">{g.label}</span>
+              </label>
+            ))}
+          </div>
+        </FieldRow>
+      </div>
+
+      <div className="border-t border-border/50 pt-3" />
+
+      {/* ── Criativo ── */}
+      <FieldRow label="Imagens do Criativo" required hint="1 imagem = imagem única · 2 ou mais = carrossel">
+        {a.images.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 mb-2">
+            {a.images.map((img, i) => (
+              <div key={i} className="relative rounded-lg overflow-hidden border border-border group/img">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.preview} alt={`Imagem ${i + 1}`} className="w-full h-20 object-cover" />
+                <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{i + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveImage(i)}
+                  disabled={disabled}
+                  className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover/img:opacity-100 hover:bg-destructive"
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <div className="flex rounded-lg border border-border p-0.5 bg-background">
+            {([
+              { value: "upload" as const, label: "Upload", icon: <Upload className="h-3.5 w-3.5" /> },
+              { value: "generate" as const, label: "Prompt para IA", icon: <Wand2 className="h-3.5 w-3.5" /> },
+            ]).map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setImageMode(m.value)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                  imageMode === m.value ? "bg-meta-blue text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+                disabled={disabled}
+              >
+                {m.icon}{m.label}
+              </button>
+            ))}
+          </div>
+
+          {imageMode === "upload" ? (
+            <ImageUpload
+              imageUrl={null}
+              onUpload={(url, preview) => onAddImage({ url, preview })}
+              onClear={() => {}}
+              disabled={disabled}
+            />
+          ) : (
+            <ImageGenerator
+              initialPrompt={buildImagePrompt(a, campaignName)}
+              onAccept={(url, preview) => onAddImage({ url, preview: preview || url })}
+              disabled={disabled}
+            />
+          )}
+        </div>
+
+        {err(a.images.length === 0) && (
+          <p className="text-xs text-destructive flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" />Adicione ao menos uma imagem
+          </p>
+        )}
+      </FieldRow>
+
+      <FieldRow label="Título" required hint="Máximo 40 caracteres">
+        <div className="relative">
+          <Input
+            value={a.headline}
+            onChange={(e) => onChange({ headline: e.target.value.slice(0, 40) })}
+            placeholder="Ex: Descubra nossa nova coleção"
+            className={cn("h-9 text-sm pr-12", err(!a.headline.trim()) && "border-destructive")}
+          />
+          <span className={cn("absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tabular-nums", a.headline.length > 35 ? "text-warning" : "text-muted-foreground")}>
+            {a.headline.length}/40
+          </span>
+        </div>
+      </FieldRow>
+
+      <FieldRow label="Texto Principal" required hint="Máximo 125 caracteres">
+        <div className="relative">
+          <Textarea
+            value={a.primary_text}
+            onChange={(e) => onChange({ primary_text: e.target.value.slice(0, 125) })}
+            placeholder="Ex: Aproveite os melhores produtos com frete grátis!"
+            rows={2}
+            className={cn("text-sm pr-16", err(!a.primary_text.trim()) && "border-destructive")}
+          />
+          <span className={cn("absolute right-3 top-3 text-[11px] tabular-nums", a.primary_text.length > 110 ? "text-warning" : "text-muted-foreground")}>
+            {a.primary_text.length}/125
+          </span>
+        </div>
+      </FieldRow>
+
+      <FieldRow label="Descrição" hint="Máximo 30 caracteres (opcional)">
+        <div className="relative">
+          <Input
+            value={a.description}
+            onChange={(e) => onChange({ description: e.target.value.slice(0, 30) })}
+            placeholder="Ex: Frete grátis"
+            className="h-9 text-sm pr-12"
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground tabular-nums">
+            {a.description.length}/30
+          </span>
+        </div>
+      </FieldRow>
+
+      <div className="grid grid-cols-2 gap-2">
+        <FieldRow label="Botão (CTA)">
+          <Select value={a.cta} onValueChange={(v) => onChange({ cta: v as AudienceCreative["cta"] })}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CTA_OPTIONS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+        <FieldRow label="URL de Destino" required>
+          <Input
+            value={a.destination_url}
+            onChange={(e) => onChange({ destination_url: e.target.value })}
+            placeholder="https://..."
+            className={cn("h-9 text-sm", err(!a.destination_url.trim()) && "border-destructive")}
+          />
+        </FieldRow>
+      </div>
+    </div>
+  );
+}
+
+// ── Formulário principal ────────────────────────────────────────────────────────
+
 export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: AgentFormProps) {
   const [form, setForm] = useState<AgentFormData>(defaultForm);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageMode, setImageMode] = useState<"upload" | "generate">("upload");
   const [openSection, setOpenSection] = useState(1);
-  const [errors, setErrors] = useState<Partial<Record<keyof AgentFormData | "image", string>>>({});
+  const [attempted, setAttempted] = useState(false);
+  const [budgetCents, setBudgetCents] = useState(() => Math.round(defaultForm.budget_amount * 100));
 
-  const filteredAccounts = adAccounts.filter(
-    (a) => !form.bm_id || a.bm_id === form.bm_id
-  );
-
-  // Auto-select the single BM on mount
+  // Auto-seleciona a BM única quando ainda não há conta escolhida
   useEffect(() => {
     if (businessManagers.length === 1 && !form.bm_id) {
       setForm((prev) => ({ ...prev, bm_id: businessManagers[0].id }));
     }
   }, [businessManagers]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const set = <K extends keyof AgentFormData>(key: K, value: AgentFormData[K]) => {
+  const set = <K extends keyof AgentFormData>(key: K, value: AgentFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => ({ ...prev, [key]: undefined }));
+
+  const selectAccount = (id: string) => {
+    const account = adAccounts.find((acc) => acc.id === id);
+    setForm((prev) => ({ ...prev, account_ids: [id], bm_id: account?.bm_id ?? prev.bm_id }));
   };
 
-  const toggleAccount = (id: string) => {
-    setForm((prev) => {
-      const current = prev.account_ids;
-      const next = current.includes(id)
-        ? current.filter((v) => v !== id)
-        : [...current, id];
-      return { ...prev, account_ids: next };
-    });
-    setErrors((prev) => ({ ...prev, account_ids: undefined }));
+  const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digits = e.target.value.replace(/\D/g, "").slice(0, 8);
+    const cents = parseInt(digits || "0", 10);
+    setBudgetCents(cents);
+    set("budget_amount", cents / 100);
   };
 
-  const togglePlacement = (value: string) => {
+  const budgetDisplay = (budgetCents / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  // ── Helpers de públicos ──
+  const updateAudience = (id: string, partial: Partial<AudienceCreative>) =>
+    setForm((prev) => ({
+      ...prev,
+      audiences: prev.audiences.map((a) => (a.id === id ? { ...a, ...partial } : a)),
+    }));
+
+  const addAudience = () =>
+    setForm((prev) => ({ ...prev, audiences: [...prev.audiences, makeAudience()] }));
+
+  const removeAudience = (id: string) =>
+    setForm((prev) => ({ ...prev, audiences: prev.audiences.filter((a) => a.id !== id) }));
+
+  const addImage = (id: string, img: AudienceImage) =>
+    setForm((prev) => ({
+      ...prev,
+      audiences: prev.audiences.map((a) => (a.id === id ? { ...a, images: [...a.images, img] } : a)),
+    }));
+
+  const removeImage = (id: string, imgIndex: number) =>
+    setForm((prev) => ({
+      ...prev,
+      audiences: prev.audiences.map((a) =>
+        a.id === id ? { ...a, images: a.images.filter((_, i) => i !== imgIndex) } : a
+      ),
+    }));
+
+  const togglePlacement = (value: string) =>
     setForm((prev) => {
       const current = prev.manual_placements ?? [];
       return {
@@ -191,40 +491,33 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
           : [...current, value],
       };
     });
-  };
 
-  const validate = (): boolean => {
-    const e: typeof errors = {};
-    if (!form.bm_id) e.bm_id = "Nenhuma BM encontrada";
-    if (form.account_ids.length === 0) e.account_ids = "Selecione ao menos uma conta de anúncios";
-    if (!form.campaign_name.trim()) e.campaign_name = "Nome da campanha obrigatório";
-    if (!form.budget_amount || form.budget_amount <= 0) e.budget_amount = "Valor deve ser maior que zero";
-    if (!form.start_date) e.start_date = "Data de início obrigatória";
-    if (!form.audience_description.trim()) e.audience_description = "Descreva o público-alvo";
-    if (!form.locations.trim()) e.locations = "Informe as localizações";
-    if (!form.headline.trim()) e.headline = "Título obrigatório";
-    if (!form.primary_text.trim()) e.primary_text = "Texto principal obrigatório";
-    if (!form.destination_url.trim()) e.destination_url = "URL de destino obrigatória";
-    if (!imageUrl) e.image = "Faça o upload de uma imagem";
-    if (form.placements === "manual" && (form.manual_placements ?? []).length === 0) {
-      e.placements = "Selecione ao menos um posicionamento";
-    }
+  // ── Validação ──
+  const audienceValid = (a: AudienceCreative) =>
+    !!a.audience_description.trim() && !!a.locations.trim() && a.images.length > 0 &&
+    !!a.headline.trim() && !!a.primary_text.trim() && !!a.destination_url.trim();
 
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+  const isSection1Done = form.account_ids.length > 0;
+  const isSection2Done =
+    !!form.campaign_name.trim() && form.budget_amount > 0 && !!form.start_date &&
+    (form.budget_type !== "total" || !!form.end_date);
+  const isSection3Done = form.audiences.length > 0 && form.audiences.every(audienceValid);
+
+  const isValid = isSection1Done && isSection2Done && isSection3Done &&
+    (form.placements !== "manual" || (form.manual_placements ?? []).length > 0);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (validate() && imageUrl) {
-      onSubmit(form, imageUrl, imagePreview ?? "");
+    setAttempted(true);
+    if (isValid) {
+      onSubmit(form);
+    } else {
+      // Abre a primeira seção incompleta
+      if (!isSection1Done) setOpenSection(1);
+      else if (!isSection2Done) setOpenSection(2);
+      else setOpenSection(3);
     }
   };
-
-  const isSection1Done = !!form.bm_id && form.account_ids.length > 0;
-  const isSection2Done = !!form.campaign_name && !!form.objective && form.budget_amount > 0 && !!form.start_date;
-  const isSection3Done = !!form.audience_description && !!form.locations;
-  const isSection4Done = !!imageUrl && !!form.headline && !!form.primary_text && !!form.destination_url;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
@@ -237,37 +530,32 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
         onToggle={() => setOpenSection(openSection === 1 ? 0 : 1)}
         completed={isSection1Done}
       >
-        {/* BM info — auto-selecionada, sem dropdown */}
-        {businessManagers.length > 0 && (
-          <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2">
-            <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Business Manager:</span>
-            <span className="text-xs font-semibold">{businessManagers[0].name}</span>
-          </div>
-        )}
-
-        <FieldRow label="Contas de Anúncios" required hint="Selecione uma ou ambas as contas para criar o anúncio">
+        <FieldRow label="Conta de Anúncios" required hint="Selecione a conta onde o anúncio será criado">
           <div className="space-y-2">
-            {filteredAccounts.map((a) => (
-              <label
-                key={a.id}
+            {adAccounts.map((acc) => (
+              <button
+                key={acc.id}
+                type="button"
+                onClick={() => selectAccount(acc.id)}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-all",
-                  form.account_ids.includes(a.id)
+                  "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all",
+                  form.account_ids[0] === acc.id
                     ? "border-meta-blue bg-meta-blue/5 ring-1 ring-meta-blue/30"
                     : "border-border hover:border-meta-blue/40"
                 )}
               >
-                <Checkbox
-                  checked={form.account_ids.includes(a.id)}
-                  onCheckedChange={() => toggleAccount(a.id)}
-                />
-                <span className="text-sm font-medium">{a.name}</span>
-                <span className="ml-auto text-[11px] font-mono text-muted-foreground">{a.meta_account_id}</span>
-              </label>
+                <div className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                  form.account_ids[0] === acc.id ? "border-meta-blue" : "border-muted-foreground/50"
+                )}>
+                  {form.account_ids[0] === acc.id && <div className="h-2 w-2 rounded-full bg-meta-blue" />}
+                </div>
+                <span className="text-sm font-medium flex-1 truncate">{acc.name}</span>
+                <span className="text-[11px] font-mono text-muted-foreground">{acc.meta_account_id}</span>
+              </button>
             ))}
           </div>
-          {errors.account_ids && <p className="text-xs text-destructive">{errors.account_ids}</p>}
+          {attempted && !isSection1Done && <p className="text-xs text-destructive">Selecione uma conta de anúncios</p>}
         </FieldRow>
 
         <FieldRow
@@ -303,20 +591,15 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
             value={form.campaign_name}
             onChange={(e) => set("campaign_name", e.target.value)}
             placeholder="Ex: Campanha Verão 2025"
-            className={cn("h-9 text-sm", errors.campaign_name && "border-destructive")}
+            className={cn("h-9 text-sm", attempted && !form.campaign_name.trim() && "border-destructive")}
           />
-          {errors.campaign_name && <p className="text-xs text-destructive">{errors.campaign_name}</p>}
         </FieldRow>
 
         <FieldRow label="Objetivo">
           <Select value={form.objective} onValueChange={(v) => set("objective", v as AgentFormData["objective"])}>
-            <SelectTrigger className="h-9 text-sm">
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {OBJECTIVES.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
+              {OBJECTIVES.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </FieldRow>
@@ -324,9 +607,7 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
         <div className="grid grid-cols-2 gap-2">
           <FieldRow label="Tipo de Orçamento">
             <Select value={form.budget_type} onValueChange={(v) => set("budget_type", v as "daily" | "total")}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="daily">Diário</SelectItem>
                 <SelectItem value="total">Total da campanha</SelectItem>
@@ -334,36 +615,40 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
             </Select>
           </FieldRow>
 
-          <FieldRow label="Valor (R$)" required>
-            <Input
-              type="number"
-              min={1}
-              value={form.budget_amount}
-              onChange={(e) => set("budget_amount", parseFloat(e.target.value) || 0)}
-              className={cn("h-9 text-sm", errors.budget_amount && "border-destructive")}
-            />
-            {errors.budget_amount && <p className="text-xs text-destructive">{errors.budget_amount}</p>}
+          <FieldRow label="Orçamento (R$)" required hint="Da campanha · a Meta distribui entre os públicos (CBO)">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">R$</span>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={budgetDisplay}
+                onChange={handleBudgetChange}
+                className={cn("h-9 text-sm pl-9", attempted && form.budget_amount <= 0 && "border-destructive")}
+                placeholder="0,00"
+              />
+            </div>
           </FieldRow>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <FieldRow label="Data de Início" required>
+          <FieldRow label="Início (data e hora)" required>
             <Input
-              type="date"
+              type="datetime-local"
               value={form.start_date}
               onChange={(e) => set("start_date", e.target.value)}
-              className={cn("h-9 text-sm", errors.start_date && "border-destructive")}
+              className={cn("h-9 text-sm", attempted && !form.start_date && "border-destructive")}
             />
           </FieldRow>
 
-          <FieldRow label="Data de Fim">
+          <FieldRow label="Fim (data e hora)" required={form.budget_type === "total"}>
             <Input
-              type="date"
+              type="datetime-local"
               value={form.end_date ?? ""}
               onChange={(e) => set("end_date", e.target.value || undefined)}
               min={form.start_date}
-              className="h-9 text-sm"
+              className={cn("h-9 text-sm", attempted && form.budget_type === "total" && !form.end_date && "border-destructive")}
             />
+            {form.budget_type === "total" && <p className="text-[11px] text-muted-foreground">Obrigatória para orçamento total</p>}
           </FieldRow>
         </div>
 
@@ -374,299 +659,57 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
         )}
       </FormSection>
 
-      {/* Section 3: Público */}
+      {/* Section 3: Públicos & Criativos */}
       <FormSection
         icon={<Users className="h-3.5 w-3.5" />}
-        title="Público-Alvo"
+        title={`Públicos & Criativos${form.audiences.length > 1 ? ` (${form.audiences.length})` : ""}`}
         step={3}
         open={openSection === 3}
         onToggle={() => setOpenSection(openSection === 3 ? 0 : 3)}
         completed={isSection3Done}
       >
-        <FieldRow
-          label="Descrição do Público"
-          required
-          hint="Descreva o público em português. O agente irá interpretá-lo e converter para targeting da Meta."
+        <p className="text-[11px] text-muted-foreground -mt-1">
+          Cada público tem seu próprio criativo. Adicione mais de uma imagem em um público para criar um carrossel.
+        </p>
+
+        <div className="space-y-3">
+          {form.audiences.map((a, i) => (
+            <AudienceCard
+              key={a.id}
+              audience={a}
+              index={i}
+              total={form.audiences.length}
+              campaignName={form.campaign_name}
+              attempted={attempted}
+              disabled={disabled}
+              onChange={(partial) => updateAudience(a.id, partial)}
+              onRemove={() => removeAudience(a.id)}
+              onAddImage={(img) => addImage(a.id, img)}
+              onRemoveImage={(idx) => removeImage(a.id, idx)}
+            />
+          ))}
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full h-9 gap-1.5 text-xs border-dashed"
+          onClick={addAudience}
+          disabled={disabled}
         >
-          <Textarea
-            value={form.audience_description}
-            onChange={(e) => set("audience_description", e.target.value)}
-            placeholder="Ex: Mulheres de 25 a 40 anos interessadas em moda e beleza, que seguem marcas de luxo"
-            rows={3}
-            className={cn("text-sm", errors.audience_description && "border-destructive")}
-          />
-          {errors.audience_description && <p className="text-xs text-destructive">{errors.audience_description}</p>}
-        </FieldRow>
-
-        <FieldRow label="Localização" required hint="Cidades, estados ou países separados por vírgula">
-          <Input
-            value={form.locations}
-            onChange={(e) => set("locations", e.target.value)}
-            placeholder="Ex: São Paulo, Rio de Janeiro"
-            className={cn("h-9 text-sm", errors.locations && "border-destructive")}
-          />
-        </FieldRow>
-
-        <div className="grid grid-cols-2 gap-2">
-          <FieldRow label="Idade Mínima">
-            <Input
-              type="number"
-              min={13}
-              max={65}
-              value={form.age_min}
-              onChange={(e) => set("age_min", parseInt(e.target.value) || 18)}
-              className="h-9 text-sm"
-            />
-          </FieldRow>
-
-          <FieldRow label="Idade Máxima">
-            <Input
-              type="number"
-              min={form.age_min}
-              max={65}
-              value={form.age_max}
-              onChange={(e) => set("age_max", parseInt(e.target.value) || 65)}
-              className="h-9 text-sm"
-            />
-          </FieldRow>
-        </div>
-
-        <FieldRow label="Gênero">
-          <div className="flex items-center gap-4">
-            {[
-              { value: "all", label: "Todos" },
-              { value: "male", label: "Masculino" },
-              { value: "female", label: "Feminino" },
-            ].map((g) => (
-              <label key={g.value} className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={g.value === "all" ? form.genders.includes("all") : (form.genders.includes(g.value) && !form.genders.includes("all"))}
-                  onCheckedChange={(checked) => {
-                    if (g.value === "all") {
-                      set("genders", checked ? ["all"] : []);
-                    } else {
-                      const current = form.genders.filter((v) => v !== "all");
-                      if (checked) {
-                        set("genders", [...current, g.value]);
-                      } else {
-                        set("genders", current.filter((v) => v !== g.value));
-                      }
-                    }
-                  }}
-                />
-                <span className="text-sm">{g.label}</span>
-              </label>
-            ))}
-          </div>
-        </FieldRow>
-
-        {isSection3Done && (
-          <Button type="button" size="sm" className="w-full h-8 text-xs" onClick={() => setOpenSection(4)}>
-            Próximo
-          </Button>
-        )}
+          <Plus className="h-3.5 w-3.5" />
+          Adicionar outro público
+        </Button>
       </FormSection>
 
-      {/* Section 4: Criativo */}
-      <FormSection
-        icon={<Image className="h-3.5 w-3.5" />}
-        title="Criativo do Anúncio"
-        step={4}
-        open={openSection === 4}
-        onToggle={() => setOpenSection(openSection === 4 ? 0 : 4)}
-        completed={isSection4Done}
-      >
-        <FieldRow label="Imagem do Anúncio" required>
-          {/* Confirmed image preview — shown when image is set, regardless of mode */}
-          {imageUrl && imagePreview && (
-            <div className="relative rounded-xl overflow-hidden border border-border group mb-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imagePreview} alt="Imagem do anúncio" className="w-full h-44 object-cover" />
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8 gap-1.5 text-xs bg-background/90"
-                  onClick={() => { setImageUrl(null); setImagePreview(null); setImageMode("upload"); }}
-                  disabled={disabled}
-                >
-                  <Upload className="h-3 w-3" />Trocar
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs bg-meta-blue/90 text-white hover:bg-meta-blue"
-                  onClick={() => { setImageUrl(null); setImagePreview(null); setImageMode("generate"); }}
-                  disabled={disabled}
-                >
-                  <Wand2 className="h-3 w-3" />Regerar
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  className="h-8 w-8 p-0"
-                  onClick={() => { setImageUrl(null); setImagePreview(null); }}
-                  disabled={disabled}
-                >
-                  <XIcon className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Mode tabs + content — shown when no image is confirmed */}
-          {!imageUrl && (
-            <div className="space-y-2">
-              <div className="flex rounded-lg border border-border p-0.5 bg-muted/30">
-                {([
-                  { value: "upload" as const, label: "Upload", icon: <Upload className="h-3.5 w-3.5" /> },
-                  { value: "generate" as const, label: "Prompt para IA", icon: <Wand2 className="h-3.5 w-3.5" /> },
-                ] as const).map((m) => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setImageMode(m.value)}
-                    className={cn(
-                      "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
-                      imageMode === m.value
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    disabled={disabled}
-                  >
-                    {m.icon}
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              {imageMode === "upload" && (
-                <ImageUpload
-                  onUpload={(url, preview) => {
-                    setImageUrl(url);
-                    setImagePreview(preview);
-                    setErrors((prev) => ({ ...prev, image: undefined }));
-                  }}
-                  onClear={() => { setImageUrl(null); setImagePreview(null); }}
-                  imageUrl={imageUrl}
-                  disabled={disabled}
-                />
-              )}
-
-              {imageMode === "generate" && (
-                <ImageGenerator
-                  initialPrompt={buildImagePrompt(form)}
-                  onAccept={(url, preview) => {
-                    setImageUrl(url);
-                    setImagePreview(preview);
-                    setErrors((prev) => ({ ...prev, image: undefined }));
-                  }}
-                  disabled={disabled}
-                />
-              )}
-            </div>
-          )}
-
-          {errors.image && (
-            <p className="text-xs text-destructive flex items-center gap-1 mt-1">
-              <AlertCircle className="h-3 w-3" />
-              {errors.image}
-            </p>
-          )}
-        </FieldRow>
-
-        <FieldRow label="Título" required hint="Máximo 40 caracteres">
-          <div className="relative">
-            <Input
-              value={form.headline}
-              onChange={(e) => set("headline", e.target.value.slice(0, 40))}
-              placeholder="Ex: Descubra nossa nova coleção"
-              className={cn("h-9 text-sm pr-12", errors.headline && "border-destructive")}
-            />
-            <span className={cn(
-              "absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tabular-nums",
-              form.headline.length > 35 ? "text-warning" : "text-muted-foreground"
-            )}>
-              {form.headline.length}/40
-            </span>
-          </div>
-          {errors.headline && <p className="text-xs text-destructive">{errors.headline}</p>}
-        </FieldRow>
-
-        <FieldRow label="Texto Principal" required hint="Máximo 125 caracteres">
-          <div className="relative">
-            <Textarea
-              value={form.primary_text}
-              onChange={(e) => set("primary_text", e.target.value.slice(0, 125))}
-              placeholder="Ex: Aproveite os melhores produtos com frete grátis para todo o Brasil!"
-              rows={3}
-              className={cn("text-sm pr-16", errors.primary_text && "border-destructive")}
-            />
-            <span className={cn(
-              "absolute right-3 top-3 text-[11px] tabular-nums",
-              form.primary_text.length > 110 ? "text-warning" : "text-muted-foreground"
-            )}>
-              {form.primary_text.length}/125
-            </span>
-          </div>
-          {errors.primary_text && <p className="text-xs text-destructive">{errors.primary_text}</p>}
-        </FieldRow>
-
-        <FieldRow label="Descrição" hint="Máximo 30 caracteres (opcional)">
-          <div className="relative">
-            <Input
-              value={form.description}
-              onChange={(e) => set("description", e.target.value.slice(0, 30))}
-              placeholder="Ex: Frete grátis"
-              className="h-9 text-sm pr-12"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground tabular-nums">
-              {form.description.length}/30
-            </span>
-          </div>
-        </FieldRow>
-
-        <div className="grid grid-cols-2 gap-2">
-          <FieldRow label="Botão (CTA)">
-            <Select value={form.cta} onValueChange={(v) => set("cta", v as AgentFormData["cta"])}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CTA_OPTIONS.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldRow>
-
-          <FieldRow label="URL de Destino" required>
-            <Input
-              value={form.destination_url}
-              onChange={(e) => set("destination_url", e.target.value)}
-              placeholder="https://..."
-              className={cn("h-9 text-sm", errors.destination_url && "border-destructive")}
-            />
-            {errors.destination_url && <p className="text-xs text-destructive">{errors.destination_url}</p>}
-          </FieldRow>
-        </div>
-
-        {isSection4Done && (
-          <Button type="button" size="sm" className="w-full h-8 text-xs" onClick={() => setOpenSection(5)}>
-            Próximo
-          </Button>
-        )}
-      </FormSection>
-
-      {/* Section 5: Posicionamentos */}
+      {/* Section 4: Posicionamentos */}
       <FormSection
         icon={<LayoutGrid className="h-3.5 w-3.5" />}
         title="Posicionamentos"
-        step={5}
-        open={openSection === 5}
-        onToggle={() => setOpenSection(openSection === 5 ? 0 : 5)}
+        step={4}
+        open={openSection === 4}
+        onToggle={() => setOpenSection(openSection === 4 ? 0 : 4)}
         completed={false}
       >
         <FieldRow label="Tipo de Posicionamento">
@@ -706,7 +749,9 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled }: 
                 </label>
               ))}
             </div>
-            {errors.placements && <p className="text-xs text-destructive">{errors.placements}</p>}
+            {attempted && form.placements === "manual" && (form.manual_placements ?? []).length === 0 && (
+              <p className="text-xs text-destructive">Selecione ao menos um posicionamento</p>
+            )}
           </FieldRow>
         )}
       </FormSection>

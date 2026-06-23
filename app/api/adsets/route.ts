@@ -49,7 +49,7 @@ async function handleReal(
 ): Promise<NextResponse> {
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
-    const { fetchAdSetInsights, fetchAdInsights, parseRoas, parseConversionsAll, parseMessagingConversations, parseLeadsForm, parseThruPlay, parseLandingPageViews, parsePostReactions, parsePostComments, parsePostShares, parseFollows, parseProfileVisits } = await import("@/lib/meta");
+    const { fetchAdSetInsights, fetchAdInsights, fetchAdSetStatuses, parseRoas, parseConversionsAll, parseMessagingConversations, parseLeadsForm, parseThruPlay, parseLandingPageViews, parsePostReactions, parsePostComments, parsePostShares, parseFollows, parseProfileVisits } = await import("@/lib/meta");
 
     const { data: accounts, error } = await supabaseAdmin
       .from("ad_accounts")
@@ -61,10 +61,17 @@ async function handleReal(
     const account = accounts[0];
     const dateParams = { since: startDate, until: endDate };
 
-    const [adsetInsights, adInsightsData] = await Promise.all([
+    const [adsetInsights, adInsightsData, statusMap] = await Promise.all([
       fetchAdSetInsights(account.meta_account_id, account.access_token, dateParams, campaignId).catch(() => []),
       fetchAdInsights(account.meta_account_id, account.access_token, dateParams, campaignId).catch(() => []),
+      fetchAdSetStatuses(campaignId, account.access_token).catch(() => ({} as Record<string, string>)),
     ]);
+
+    function toStatus(raw: string): "ACTIVE" | "PAUSED" | "ARCHIVED" | undefined {
+      const v = raw.toUpperCase();
+      if (v === "ACTIVE" || v === "PAUSED" || v === "ARCHIVED") return v;
+      return undefined;
+    }
 
     const adsets: AdSet[] = adsetInsights
       .filter((a) => (a as Record<string, unknown>).campaign_id === campaignId)
@@ -98,10 +105,12 @@ async function handleReal(
             const adShares = parsePostShares(ad);
             const adFollows = parseFollows(ad);
             const adProfileVisits = parseProfileVisits(ad);
+            const adId = String(adRaw.ad_id ?? `ad-${ad.ad_name}`);
             return {
-              id: String(adRaw.ad_id ?? `ad-${ad.ad_name}`),
+              id: adId,
               adset_id: asId,
               name: String(adRaw.ad_name ?? "Anúncio"),
+              status: toStatus(statusMap[adId] ?? ""),
               spend: adSpend,
               impressions: parseInt(ad.impressions ?? "0"),
               clicks: parseInt(ad.clicks ?? "0"),
@@ -128,6 +137,7 @@ async function handleReal(
           id: asId,
           campaign_id: campaignId,
           name: String(asRaw.adset_name ?? "Conjunto"),
+          status: toStatus(statusMap[asId] ?? ""),
           spend: asSpend,
           impressions: parseInt(as.impressions ?? "0"),
           clicks: parseInt(as.clicks ?? "0"),

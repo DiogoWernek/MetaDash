@@ -249,6 +249,24 @@ export async function fetchCampaignList(
   return (json.data ?? []) as MetaCampaignRaw[];
 }
 
+export async function fetchAdSetStatuses(
+  campaignId: string,
+  accessToken: string
+): Promise<Record<string, string>> {
+  const url = `${META_API_BASE}/${campaignId}/adsets?fields=id,effective_status,ads{id,effective_status}&limit=200&access_token=${accessToken}`;
+  const res = await fetch(url);
+  if (!res.ok) return {};
+  const json = await res.json();
+  const result: Record<string, string> = {};
+  for (const adset of (json.data ?? [])) {
+    result[adset.id] = adset.effective_status ?? "";
+    for (const ad of (adset.ads?.data ?? [])) {
+      result[ad.id] = ad.effective_status ?? "";
+    }
+  }
+  return result;
+}
+
 export function parseConversionsAll(data: MetaInsightsRaw): number {
   const actions = data.actions ?? [];
   const relevant = actions.find(

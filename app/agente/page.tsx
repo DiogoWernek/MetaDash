@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import {
   Bot, History, Sparkles, BarChart2, CheckCircle2,
-  XCircle, Loader2, Check, Building2,
+  XCircle, Loader2, Check, Building2, Megaphone, Users,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/dashboard/ThemeToggle";
 import { AgentForm } from "@/components/agente/AgentForm";
@@ -33,15 +33,16 @@ interface ExecStep {
   value?: string;
 }
 
-interface ExecAccount {
-  account_id: string;
-  account_name: string;
+interface ExecGroup {
+  group_id: string;
+  group_name: string;
   steps: ExecStep[];
 }
 
-const STEP_ORDER = [
+const CAMPAIGN_GROUP = "__campaign__";
+
+const AUD_STEP_ORDER = [
   "upload_image",
-  "create_campaign",
   "search_interests",
   "create_adset",
   "create_creative",
@@ -49,10 +50,10 @@ const STEP_ORDER = [
 ];
 
 const STEP_LABELS: Record<string, string> = {
-  upload_image: "Upload da imagem para Meta",
   create_campaign: "Criação da campanha",
+  upload_image: "Upload das imagens para Meta",
   search_interests: "Busca de interesses",
-  create_adset: "Criação do adset",
+  create_adset: "Criação do conjunto",
   create_creative: "Criação do criativo",
   create_ad: "Criação do anúncio",
 };
@@ -104,12 +105,10 @@ export default function AgentePage() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [plan, setPlan] = useState<AdPlan | null>(null);
   const [isMock, setIsMock] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [formData, setFormData] = useState<AgentFormData | null>(null);
 
-  const [execAccounts, setExecAccounts] = useState<ExecAccount[]>([]);
-  const [execResults, setExecResults] = useState<ExecuteResult[] | null>(null);
+  const [execGroups, setExecGroups] = useState<ExecGroup[]>([]);
+  const [execResult, setExecResult] = useState<ExecuteResult | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -125,10 +124,8 @@ export default function AgentePage() {
 
   const accountMap = Object.fromEntries(adAccounts.map((a) => [a.id, a.name]));
 
-  const handleFormSubmit = useCallback(async (fd: AgentFormData, imgUrl: string, imgPreview: string) => {
+  const handleFormSubmit = useCallback(async (fd: AgentFormData) => {
     setFormData(fd);
-    setImageUrl(imgUrl);
-    setImagePreviewUrl(imgPreview);
     setPhase("planning");
     setPlanError(null);
 
@@ -136,7 +133,7 @@ export default function AgentePage() {
       const res = await fetch("/api/agente", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formData: fd, imageUrl: imgUrl }),
+        body: JSON.stringify({ formData: fd }),
       });
       const data = await res.json() as { plan?: AdPlan; mock?: boolean; error?: string };
 
@@ -156,24 +153,28 @@ export default function AgentePage() {
   }, []);
 
   const handleApprove = useCallback(async (approvedPlan: AdPlan) => {
-    if (!imageUrl || !formData) return;
+    if (!formData) return;
     setPhase("executing");
-    setExecResults(null);
+    setExecResult(null);
 
-    // Pre-initialize step groups per account
-    const initialAccounts: ExecAccount[] = formData.account_ids.map((id) => {
-      const account = adAccounts.find((a) => a.id === id);
-      return {
-        account_id: id,
-        account_name: account?.name ?? id,
-        steps: STEP_ORDER.map((step) => ({
+    // Pré-inicializa: grupo da campanha + um grupo por público
+    const initialGroups: ExecGroup[] = [
+      {
+        group_id: CAMPAIGN_GROUP,
+        group_name: "Campanha",
+        steps: [{ step: "create_campaign", label: STEP_LABELS.create_campaign, status: "pending" }],
+      },
+      ...approvedPlan.adsets.map((a, i) => ({
+        group_id: String(i),
+        group_name: a.name,
+        steps: AUD_STEP_ORDER.map((step) => ({
           step,
           label: STEP_LABELS[step] ?? step,
           status: "pending" as const,
         })),
-      };
-    });
-    setExecAccounts(initialAccounts);
+      })),
+    ];
+    setExecGroups(initialGroups);
 
     // Create run record (non-blocking)
     let currentRunId: string | null = null;
@@ -184,7 +185,7 @@ export default function AgentePage() {
         .insert({
           account_id: formData.account_ids[0] ?? null,
           form_data: formData,
-          image_url: imageUrl,
+          image_url: formData.audiences[0]?.images[0]?.url ?? null,
           status: "running",
           started_at: new Date().toISOString(),
         })
@@ -201,7 +202,6 @@ export default function AgentePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           plan: approvedPlan,
-          imageUrl,
           accountIds: formData.account_ids,
           runId: currentRunId,
         }),
@@ -231,23 +231,29 @@ export default function AgentePage() {
           try {
             const event = JSON.parse(line.slice(6)) as ExecuteStreamEvent;
 
-            if (event.type === "step" && event.account_id) {
-              setExecAccounts((prev) =>
-                prev.map((acct) =>
-                  acct.account_id === event.account_id
+            if (event.type === "step" && event.group_id) {
+              setExecGroups((prev) =>
+                prev.map((g) =>
+                  g.group_id === event.group_id
                     ? {
-                        ...acct,
-                        steps: acct.steps.map((s) =>
+                        ...g,
+                        steps: g.steps.map((s) =>
                           s.step === event.step
                             ? { ...s, status: event.status as ExecStep["status"], label: event.label ?? s.label, value: event.value }
                             : s
                         ),
                       }
-                    : acct
+                    : g
                 )
               );
-            } else if (event.type === "done" && event.results) {
-              setExecResults(event.results);
+            } else if (event.type === "group_start" && event.group_id) {
+              setExecGroups((prev) =>
+                prev.map((g) =>
+                  g.group_id === event.group_id ? { ...g, group_name: event.group_name ?? g.group_name } : g
+                )
+              );
+            } else if (event.type === "done" && event.result) {
+              setExecResult(event.result);
               setPhase("done");
               setHistoryRefreshKey((k) => k + 1);
             } else if (event.type === "error") {
@@ -264,16 +270,14 @@ export default function AgentePage() {
       setPlanError(String(err instanceof Error ? err.message : err));
       setPhase("error");
     }
-  }, [imageUrl, formData, adAccounts]);
+  }, [formData]);
 
   const handleReset = () => {
     setPhase("form");
     setPlan(null);
     setPlanError(null);
-    setExecAccounts([]);
-    setExecResults(null);
-    setImageUrl(null);
-    setImagePreviewUrl(null);
+    setExecGroups([]);
+    setExecResult(null);
     setFormData(null);
   };
 
@@ -410,15 +414,9 @@ export default function AgentePage() {
             </div>
             <AdPlanReview
               plan={plan}
-              imageUrl={imageUrl}
-              imagePreviewUrl={imagePreviewUrl}
               isMock={isMock}
               onApprove={handleApprove}
               onBack={handleReset}
-              onImageChange={(url, preview) => {
-                setImageUrl(url || null);
-                setImagePreviewUrl(preview || null);
-              }}
             />
           </div>
         )}
@@ -435,22 +433,22 @@ export default function AgentePage() {
                 </div>
                 <h2 className="text-base font-semibold">Criando campanha na Meta...</h2>
                 <p className="text-xs text-muted-foreground">
-                  {execAccounts.length > 1
-                    ? `Criando em ${execAccounts.length} contas sequencialmente`
+                  {execGroups.length > 2
+                    ? `Campanha com ${execGroups.length - 1} públicos`
                     : "Aguarde enquanto o anúncio é configurado"}
                 </p>
               </div>
 
               <div className="space-y-4">
-                {execAccounts.map((acct) => (
-                  <div key={acct.account_id} className="space-y-1.5">
-                    {execAccounts.length > 1 && (
-                      <div className="flex items-center gap-2 px-1">
-                        <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="text-xs font-semibold text-muted-foreground">{acct.account_name}</span>
-                      </div>
-                    )}
-                    {acct.steps.map((s) => <StepRow key={s.step} s={s} />)}
+                {execGroups.map((g) => (
+                  <div key={g.group_id} className="space-y-1.5">
+                    <div className="flex items-center gap-2 px-1">
+                      {g.group_id === CAMPAIGN_GROUP
+                        ? <Megaphone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        : <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                      <span className="text-xs font-semibold text-muted-foreground truncate">{g.group_name}</span>
+                    </div>
+                    {g.steps.map((s) => <StepRow key={s.step} s={s} />)}
                   </div>
                 ))}
               </div>
@@ -459,7 +457,7 @@ export default function AgentePage() {
         )}
 
         {/* ── Phase: Done ──────────────────────────────────────────────── */}
-        {phase === "done" && execResults && (
+        {phase === "done" && execResult && (
           <div className="max-w-lg mx-auto">
             <div className="rounded-xl border border-success/30 bg-success/5 p-6 space-y-4">
               <div className="text-center space-y-2">
@@ -469,49 +467,58 @@ export default function AgentePage() {
                   </div>
                 </div>
                 <h2 className="text-lg font-bold text-success">
-                  {isMock ? "Simulação concluída!" : execResults.length > 1 ? "Anúncios criados com sucesso!" : "Anúncio criado com sucesso!"}
+                  {isMock ? "Simulação concluída!" : "Campanha criada com sucesso!"}
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   {isMock
                     ? "Todos os passos foram simulados. Configure as credenciais reais para criar anúncios de verdade."
-                    : "Campanha criada com status PAUSADO. Revise no Ads Manager e ative manualmente quando pronto."}
+                    : `Campanha com ${execResult.adsets.length} público${execResult.adsets.length !== 1 ? "s" : ""} criada com status PAUSADO. Revise no Ads Manager e ative manualmente quando pronto.`}
                 </p>
               </div>
 
-              <div className="space-y-3">
-                {execResults.map((r) => (
-                  <div key={r.account_id} className="rounded-lg border border-border bg-card p-3 space-y-2">
-                    {execResults.length > 1 && (
-                      <div className="flex items-center gap-2 pb-2 border-b border-border/50">
-                        <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-xs font-semibold">{r.account_name}</span>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+                {/* Conta + campanha */}
+                <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-semibold">{execResult.account_name}</span>
+                </div>
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-1.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Campanha ID</p>
+                  <p className="text-xs font-mono text-foreground mt-0.5">{execResult.campaign_id}</p>
+                </div>
+
+                {/* Públicos */}
+                {execResult.adsets.map((ad, i) => (
+                  <div key={i} className="rounded-md border border-border bg-muted/20 p-2.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-4 w-4 items-center justify-center rounded bg-meta-blue/10 text-meta-blue text-[10px] font-bold">{i + 1}</div>
+                      <span className="text-xs font-medium truncate">{ad.name}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
                       {[
-                        { label: "Campanha", value: r.campaign_id },
-                        { label: "Adset", value: r.adset_id },
-                        { label: "Criativo", value: r.creative_id },
-                        { label: "Anúncio", value: r.ad_id },
+                        { label: "Conjunto", value: ad.adset_id },
+                        { label: "Criativo", value: ad.creative_id },
+                        { label: "Anúncio", value: ad.ad_id },
                       ].map((item) => (
-                        <div key={item.label} className="rounded-md border border-border bg-muted/30 px-3 py-1.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{item.label} ID</p>
-                          <p className="text-xs font-mono text-foreground mt-0.5">{item.value}</p>
+                        <div key={item.label} className="rounded border border-border bg-card px-2 py-1">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{item.label}</p>
+                          <p className="text-[11px] font-mono text-foreground truncate">{item.value}</p>
                         </div>
                       ))}
                     </div>
-                    {!isMock && (
-                      <a
-                        href={`https://adsmanager.facebook.com/adsmanager/manage/ads?act=${r.account_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 rounded-lg border border-meta-blue/30 bg-meta-blue/5 px-4 py-2 text-xs text-meta-blue font-medium hover:bg-meta-blue/10 transition-colors"
-                      >
-                        Abrir no Ads Manager
-                      </a>
-                    )}
                   </div>
                 ))}
+
+                {!isMock && (
+                  <a
+                    href={`https://adsmanager.facebook.com/adsmanager/manage/ads?act=${adAccounts.find((a) => a.id === execResult.account_id)?.meta_account_id ?? execResult.account_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 rounded-lg border border-meta-blue/30 bg-meta-blue/5 px-4 py-2 text-xs text-meta-blue font-medium hover:bg-meta-blue/10 transition-colors"
+                  >
+                    Abrir no Ads Manager
+                  </a>
+                )}
               </div>
 
               <Button variant="outline" className="w-full" onClick={handleReset}>

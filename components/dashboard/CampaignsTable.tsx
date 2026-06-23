@@ -10,6 +10,7 @@ import {
   ArrowDown,
   Loader2,
   Video,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,8 +30,9 @@ import {
   formatRoas,
   cn,
 } from "@/lib/utils";
-import type { Campaign, AdSet, Ad, FilterState } from "@/types";
+import type { Campaign, AdSet, Ad, FilterState, AiAnalysisData } from "@/types";
 import { AdDetailsModal } from "./AdDetailsModal";
+import { AiAnalysisModal } from "./AiAnalysisModal";
 
 interface CampaignsTableProps {
   campaigns: Campaign[];
@@ -166,12 +168,13 @@ function SortButton({ column, sortKey, sortDir, onSort }: {
 
 // ── AdSet + Ad rows ───────────────────────────────────────────────────────────
 
-function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction }: {
+function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction, onAiAnalysis }: {
   adsets: AdSet[];
   loadingAdsets: boolean;
   accountId: string;
   objective: string;
   onAdAction: (metaAdId: string, adName: string) => void;
+  onAiAnalysis: (data: AiAnalysisData) => void;
 }) {
   const [expandedAdSets, setExpandedAdSets] = useState<Set<string>>(new Set());
 
@@ -210,9 +213,48 @@ function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction }: 
             >
               {/* Ações */}
               <td className="pl-4 pr-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
-                  <Video className="h-3.5 w-3.5" />
-                </Button>
+                <div className="flex items-center justify-center gap-0.5">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
+                    <Video className="h-3.5 w-3.5" />
+                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-violet-400 hover:bg-violet-400/10 hover:text-violet-400"
+                        onClick={() => onAiAnalysis({
+                          type: "conjunto",
+                          name: adset.name,
+                          status: adset.status,
+                          spend: adset.spend,
+                          impressions: adset.impressions,
+                          clicks: adset.clicks,
+                          ctr: adset.ctr,
+                          cpm: adset.cpm,
+                          roas: adset.roas || undefined,
+                          cpa: adset.cpa,
+                          resultado,
+                          custo_resultado: custoResultado,
+                          messaging_conversations: adset.messaging_conversations,
+                          cost_per_conversation: adset.cost_per_conversation,
+                          leads_form: adset.leads_form,
+                          cost_per_lead_form: adset.cost_per_lead_form,
+                          cost_per_thruplay: adset.cost_per_thruplay,
+                          cost_per_landing_page_view: adset.cost_per_landing_page_view,
+                          post_reactions: adset.post_reactions,
+                          post_comments: adset.post_comments,
+                          post_shares: adset.post_shares,
+                          follows: adset.follows,
+                          profile_visits: adset.profile_visits,
+                        })}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="text-xs">Análise com IA</TooltipContent>
+                  </Tooltip>
+                </div>
               </td>
               {/* Nome */}
               <td className="py-2 pr-3" style={{ paddingLeft: "40px" }}>
@@ -223,8 +265,14 @@ function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction }: 
                   <span className="text-xs font-medium truncate max-w-[200px]">{adset.name}</span>
                 </div>
               </td>
-              {/* Status (vazio) */}
-              <td className="px-3 py-2" />
+              {/* Status */}
+              <td className="px-3 py-2">
+                {adset.status && (
+                  <Badge variant={STATUS_VARIANTS[adset.status] ?? "outline"}>
+                    {STATUS_LABELS[adset.status] ?? adset.status}
+                  </Badge>
+                )}
+              </td>
               {/* Última Edição (vazio) */}
               <td className="px-3 py-2" />
               {/* Objetivo (vazio) */}
@@ -285,19 +333,58 @@ function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction }: 
                 <tr key={ad.id} className="border-b border-border/30 bg-muted/10 transition-colors hover:bg-muted/20">
                   {/* Ações */}
                   <td className="pl-4 pr-2 py-2 text-center">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-meta-blue hover:bg-meta-blue/10"
-                          onClick={() => onAdAction(ad.id, ad.name)}
-                        >
-                          <Video className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="text-xs">Métricas de Vídeo &amp; Prévia do Criativo</TooltipContent>
-                    </Tooltip>
+                    <div className="flex items-center justify-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-meta-blue hover:bg-meta-blue/10"
+                            onClick={() => onAdAction(ad.id, ad.name)}
+                          >
+                            <Video className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">Métricas de Vídeo &amp; Prévia do Criativo</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-violet-400 hover:bg-violet-400/10 hover:text-violet-400"
+                            onClick={() => onAiAnalysis({
+                              type: "anuncio",
+                              name: ad.name,
+                              status: ad.status,
+                              spend: ad.spend,
+                              impressions: ad.impressions,
+                              clicks: ad.clicks,
+                              ctr: ad.ctr,
+                              cpm: ad.cpm,
+                              roas: ad.roas || undefined,
+                              cpa: ad.cpa,
+                              resultado: adResultado,
+                              custo_resultado: adCusto,
+                              messaging_conversations: ad.messaging_conversations,
+                              cost_per_conversation: ad.cost_per_conversation,
+                              leads_form: ad.leads_form,
+                              cost_per_lead_form: ad.cost_per_lead_form,
+                              cost_per_thruplay: ad.cost_per_thruplay,
+                              cost_per_landing_page_view: ad.cost_per_landing_page_view,
+                              post_reactions: ad.post_reactions,
+                              post_comments: ad.post_comments,
+                              post_shares: ad.post_shares,
+                              follows: ad.follows,
+                              profile_visits: ad.profile_visits,
+                            })}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">Análise com IA</TooltipContent>
+                      </Tooltip>
+                    </div>
                   </td>
                   {/* Nome */}
                   <td className="py-2 pr-3" style={{ paddingLeft: "60px" }}>
@@ -306,8 +393,14 @@ function AdSetRows({ adsets, loadingAdsets, accountId, objective, onAdAction }: 
                       <span className="text-xs text-muted-foreground truncate max-w-[190px]">{ad.name}</span>
                     </div>
                   </td>
-                  {/* Status (vazio) */}
-                  <td className="px-3 py-2" />
+                  {/* Status */}
+                  <td className="px-3 py-2">
+                    {ad.status && (
+                      <Badge variant={STATUS_VARIANTS[ad.status] ?? "outline"}>
+                        {STATUS_LABELS[ad.status] ?? ad.status}
+                      </Badge>
+                    )}
+                  </td>
                   {/* Última Edição (vazio) */}
                   <td className="px-3 py-2" />
                   {/* Objetivo (vazio) */}
@@ -380,6 +473,7 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
   const [adsetCache, setAdsetCache] = useState<Record<string, AdSet[]>>({});
   const [loadingAdsets, setLoadingAdsets] = useState<Set<string>>(new Set());
   const [selectedAd, setSelectedAd] = useState<{ metaAdId: string; adName: string; accountId: string } | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisData | null>(null);
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -510,7 +604,7 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                   <thead>
                     <tr className="border-b border-border">
                       {/* Ações */}
-                      <th className="pl-4 pr-2 py-2.5 w-12 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <th className="pl-4 pr-2 py-2.5 w-24 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                         Ações
                       </th>
                       {/* Campanha */}
@@ -706,16 +800,58 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                             >
                               {/* Ações */}
                               <td className="pl-4 pr-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
-                                        <Video className="h-3.5 w-3.5" />
+                                <div className="flex items-center justify-center gap-0.5">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 opacity-30 cursor-not-allowed" disabled>
+                                          <Video className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right" className="text-xs">Expanda a campanha para ver anúncios</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-violet-400 hover:bg-violet-400/10 hover:text-violet-400"
+                                        onClick={() => setAiAnalysis({
+                                          type: "campanha",
+                                          name: campaign.name,
+                                          status: campaign.status,
+                                          objective: campaign.objective,
+                                          budget: campaign.budget,
+                                          spend: campaign.spend,
+                                          impressions: campaign.impressions,
+                                          clicks: campaign.clicks,
+                                          ctr: campaign.ctr,
+                                          cpm: campaign.cpm,
+                                          roas: campaign.roas || undefined,
+                                          cpa: cpa ?? undefined,
+                                          resultado,
+                                          custo_resultado: custoResultado,
+                                          conversions: campaign.conversions,
+                                          messaging_conversations: campaign.messaging_conversations,
+                                          cost_per_conversation: campaign.cost_per_conversation,
+                                          leads_form: campaign.leads_form,
+                                          cost_per_lead_form: campaign.cost_per_lead_form,
+                                          cost_per_thruplay: campaign.cost_per_thruplay,
+                                          cost_per_landing_page_view: campaign.cost_per_landing_page_view,
+                                          post_reactions: campaign.post_reactions,
+                                          post_comments: campaign.post_comments,
+                                          post_shares: campaign.post_shares,
+                                          follows: campaign.follows,
+                                          profile_visits: campaign.profile_visits,
+                                        })}
+                                      >
+                                        <Sparkles className="h-3.5 w-3.5" />
                                       </Button>
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="right" className="text-xs">Expanda a campanha para ver anúncios</TooltipContent>
-                                </Tooltip>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right" className="text-xs">Análise com IA</TooltipContent>
+                                  </Tooltip>
+                                </div>
                               </td>
                               {/* Nome */}
                               <td className="py-3 pl-1 pr-3">
@@ -885,6 +1021,7 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
                                 onAdAction={(metaAdId, adName) =>
                                   setSelectedAd({ metaAdId, adName, accountId: campaign.account_id })
                                 }
+                                onAiAnalysis={setAiAnalysis}
                               />
                             )}
                           </React.Fragment>
@@ -941,6 +1078,12 @@ export function CampaignsTable({ campaigns, loading, currentFilters }: Campaigns
           )}
         </CardContent>
       </Card>
+      {aiAnalysis && (
+        <AiAnalysisModal
+          data={aiAnalysis}
+          onClose={() => setAiAnalysis(null)}
+        />
+      )}
       {selectedAd && currentFilters && (
         <AdDetailsModal
           metaAdId={selectedAd.metaAdId}
