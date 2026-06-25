@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
           } catch (adsetErr) {
             const errMsg = String(adsetErr instanceof Error ? adsetErr.message : adsetErr);
             overallStatus = adsetResults.length > 0 ? "partial" : "failed";
-            errorLog = (errorLog ? errorLog + "\n" : "") + `[${adset.name}] ${errMsg}`;
+            errorLog = (errorLog ? errorLog + "\n" : "") + `[${adset.name}] (${currentStep}) ${errMsg}`;
             send({ type: "step", step: currentStep, status: "error", label: `Erro: ${errMsg}`, group_id: gid });
           }
         }

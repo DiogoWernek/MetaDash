@@ -8,8 +8,17 @@ async function metaPost(path: string, token: string, body: Record<string, unknow
   });
   const json = await res.json() as Record<string, unknown>;
   if (!res.ok || json.error) {
-    const err = json.error as { message?: string; error_user_msg?: string } | undefined;
-    throw new Error(err?.error_user_msg ?? err?.message ?? `Meta API error ${res.status}`);
+    const err = json.error as {
+      message?: string; error_user_msg?: string;
+      code?: number; error_subcode?: number; fbtrace_id?: string;
+    } | undefined;
+    const base = err?.error_user_msg ?? err?.message ?? `Meta API error ${res.status}`;
+    const detail = [
+      err?.code != null ? `code ${err.code}` : null,
+      err?.error_subcode != null ? `subcode ${err.error_subcode}` : null,
+      err?.fbtrace_id ? `trace ${err.fbtrace_id}` : null,
+    ].filter(Boolean).join(", ");
+    throw new Error(detail ? `${base} (${detail})` : base);
   }
   return json;
 }
