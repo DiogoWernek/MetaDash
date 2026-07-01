@@ -156,6 +156,8 @@ export async function POST(req: NextRequest) {
             }
             send({ type: "step", step: "search_interests", status: "done", label: `${resolvedInterests.length} interesses encontrados`, group_id: gid });
 
+            const isCarousel = imageHashes.length > 1;
+
             // Adset (sem budget — CBO na campanha)
             currentStep = "create_adset";
             send({ type: "step", step: "create_adset", status: "start", label: "Criando conjunto de anúncios...", group_id: gid });
@@ -181,7 +183,6 @@ export async function POST(req: NextRequest) {
             send({ type: "step", step: "create_adset", status: "done", label: "Conjunto de anúncios criado", value: adsetId, group_id: gid });
 
             // Criativo (carrossel se 2+ imagens)
-            const isCarousel = imageHashes.length > 1;
             currentStep = "create_creative";
             send({ type: "step", step: "create_creative", status: "start", label: isCarousel ? "Criando criativo em carrossel..." : "Criando criativo do anúncio...", group_id: gid });
             const creativeId = await createAdCreative(metaAccountId, token, {

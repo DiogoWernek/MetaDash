@@ -210,7 +210,7 @@ export async function createAdset(
     facebook_positions?: string[];
     instagram_positions?: string[];
     destination_type?: string;
-    promoted_object?: { page_id?: string };
+    promoted_object?: { page_id?: string; object_story_id?: string };
   }
 ): Promise<string> {
   // Geo resolvido (cidades → key, países → ISO) e idade dentro dos limites da Meta (13–65)
@@ -262,7 +262,11 @@ export async function createAdset(
     };
     if (params.end_time) b.end_time = params.end_time;
     if (params.destination_type) b.destination_type = params.destination_type;
-    if (params.promoted_object?.page_id) b.promoted_object = { page_id: params.promoted_object.page_id };
+    if (params.promoted_object?.page_id) {
+      const po: Record<string, string> = { page_id: params.promoted_object.page_id };
+      if (params.promoted_object.object_story_id) po.object_story_id = params.promoted_object.object_story_id;
+      b.promoted_object = po;
+    }
     return b;
   };
 
@@ -280,6 +284,23 @@ export async function createAdset(
       const id = res.id as string | undefined;
       if (!id) throw new Error("adset_id não retornado");
       return id;
+    }
+    // subcode 2490408 = optimization_goal incompatível com o objetivo → tenta metas
+    // universais em ordem (REACH, depois IMPRESSIONS). Cobre casos onde a Meta
+    // muda quais metas são aceitas por objetivo.
+    if (msg.includes("2490408")) {
+      const fallbacks = ["REACH", "IMPRESSIONS"].filter((g) => g !== params.optimization_goal);
+      for (const goal of fallbacks) {
+        try {
+          const body = buildBody(targeting);
+          body.optimization_goal = goal;
+          const res = await metaPost(`${accountId}/adsets`, token, body);
+          const id = res.id as string | undefined;
+          if (id) return id;
+        } catch {
+          // tenta o próximo fallback
+        }
+      }
     }
     throw err;
   }
@@ -303,18 +324,34 @@ export async function createAdCreative(
     whatsapp_link?: string;
   }
 ): Promise<string> {
-  // Click-to-WhatsApp: o CTA aponta para o WhatsApp e o link do criativo vira o link wa.me
   const isWhatsApp = params.call_to_action_type === "WHATSAPP_MESSAGE";
-  const destLink = isWhatsApp && params.whatsapp_link ? params.whatsapp_link : params.link;
-  const callToAction = {
-    type: params.call_to_action_type,
-    value: isWhatsApp
-      ? { app_destination: "WHATSAPP", link: destLink }
-      : { link: params.link },
-  };
+  const hasLink = !!params.link?.trim();
+  // Engajamento (sem link e sem WhatsApp): post fica linkado à própria Página,
+  // sem CTA externo. Isso gera um object_story_id válido para promover no adset.
+  const isEngagement = !hasLink && !isWhatsApp;
+
+  // Link efetivo do criativo:
+  //  - WhatsApp → link wa.me
+  //  - com link  → link informado
+  //  - engajamento → URL da própria Página (não exibida como CTA)
+  const destLink = isWhatsApp && params.whatsapp_link
+    ? params.whatsapp_link
+    : hasLink
+      ? params.link
+      : `https://www.facebook.com/${params.page_id}`;
+
+  // CTA só é enviado quando há um destino real (link ou WhatsApp).
+  // Em engajamento, omitir call_to_action → post limpo, só curtir/comentar/compartilhar.
+  const callToAction = isEngagement
+    ? undefined
+    : {
+        type: params.call_to_action_type,
+        value: isWhatsApp
+          ? { app_destination: "WHATSAPP", link: destLink }
+          : { link: params.link },
+      };
 
   let linkData: Record<string, unknown>;
-
   if (params.image_hashes.length > 1) {
     // Carrossel
     linkData = {
@@ -327,7 +364,7 @@ export async function createAdCreative(
         image_hash: hash,
         name: params.title,
         description: params.description,
-        call_to_action: callToAction,
+        ...(callToAction ? { call_to_action: callToAction } : {}),
       })),
     };
   } else {
@@ -338,20 +375,36 @@ export async function createAdCreative(
       message: params.body,
       name: params.title,
       description: params.description,
-      call_to_action: callToAction,
+      ...(callToAction ? { call_to_action: callToAction } : {}),
     };
   }
 
   const res = await metaPost(`${accountId}/adcreatives`, token, {
     name: params.name,
-    object_story_spec: {
-      page_id: params.page_id,
-      link_data: linkData,
-    },
+    object_story_spec: { page_id: params.page_id, link_data: linkData },
   });
   const id = res.id as string | undefined;
   if (!id) throw new Error("creative_id não retornado");
   return id;
+}
+
+// Fetch the page-post id from a creative (para promover em adsets POST_ENGAGEMENT).
+// Tenta effective_object_story_id e object_story_id; faz retry por consistência eventual.
+// Retorna "" se não encontrar (o chamador decide o fallback) — não lança.
+export async function getCreativeObjectStoryId(creativeId: string, token: string): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const json = await metaGet(creativeId, token, {
+        fields: "effective_object_story_id,object_story_id",
+      });
+      const storyId = (json.effective_object_story_id ?? json.object_story_id) as string | undefined;
+      if (storyId) return storyId;
+    } catch {
+      // ignora e tenta de novo
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 900));
+  }
+  return "";
 }
 
 // Create ad → returns ad_id

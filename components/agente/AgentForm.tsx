@@ -177,6 +177,7 @@ interface AudienceCardProps {
   campaignName: string;
   attempted: boolean;
   disabled?: boolean;
+  objective: string;
   onChange: (partial: Partial<AudienceCreative>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
@@ -185,11 +186,12 @@ interface AudienceCardProps {
 }
 
 function AudienceCard({
-  audience, index, total, campaignName, attempted, disabled,
+  audience, index, total, campaignName, attempted, disabled, objective,
   onChange, onRemove, onDuplicate, onAddImage, onRemoveImage,
 }: AudienceCardProps) {
   const [imageMode, setImageMode] = useState<"upload" | "generate">("upload");
   const a = audience;
+  const isEngagement = objective === "OUTCOME_ENGAGEMENT";
   const err = (cond: boolean) => attempted && cond;
 
   return (
@@ -423,12 +425,12 @@ function AudienceCard({
             </SelectContent>
           </Select>
         </FieldRow>
-        <FieldRow label="URL de Destino" required>
+        <FieldRow label="URL de Destino" required={!isEngagement} hint={isEngagement ? "Opcional para engajamento" : undefined}>
           <Input
             value={a.destination_url}
             onChange={(e) => onChange({ destination_url: e.target.value })}
             placeholder="https://..."
-            className={cn("h-9 text-sm", err(!a.destination_url.trim()) && "border-destructive")}
+            className={cn("h-9 text-sm", !isEngagement && err(!a.destination_url.trim()) && "border-destructive")}
           />
         </FieldRow>
       </div>
@@ -529,9 +531,11 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
     });
 
   // ── Validação ──
-  const audienceValid = (a: AudienceCreative) =>
-    !!a.audience_description.trim() && !!a.locations.trim() && a.images.length > 0 &&
-    !!a.headline.trim() && !!a.primary_text.trim() && !!a.destination_url.trim();
+  const audienceValid = (a: AudienceCreative) => {
+    const base = !!a.audience_description.trim() && !!a.locations.trim() && a.images.length > 0 &&
+      !!a.headline.trim() && !!a.primary_text.trim();
+    return base && (form.objective === "OUTCOME_ENGAGEMENT" || !!a.destination_url.trim());
+  };
 
   // Leads via Click-to-WhatsApp exige número do WhatsApp + ID da página
   const leadsWhatsAppOk =
@@ -742,6 +746,7 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
               campaignName={form.campaign_name}
               attempted={attempted}
               disabled={disabled}
+              objective={form.objective}
               onChange={(partial) => updateAudience(a.id, partial)}
               onRemove={() => removeAudience(a.id)}
               onDuplicate={() => duplicateAudience(a.id)}

@@ -394,7 +394,7 @@ export interface AdPlanAdset {
   optimization_goal: string;
   billing_event: string;
   destination_type?: string;             // ex.: "WHATSAPP" (Click-to-WhatsApp)
-  promoted_object?: { page_id?: string };
+  promoted_object?: { page_id?: string; object_story_id?: string };
   targeting: AdPlanTargeting;
   creative: AdPlanCreative;   // cada público tem seu próprio criativo
 }
