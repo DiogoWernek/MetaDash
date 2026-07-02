@@ -83,6 +83,65 @@ export async function uploadAdImage(
   return hash;
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Upload video from public URL → returns video_id (ainda EM PROCESSAMENTO, ver waitForVideoReady)
+// Mesmo motivo do uploadAdImage: baixa no servidor e sobe multipart binário, nunca manda a URL
+// direto pra Meta buscar.
+export async function uploadAdVideo(
+  accountId: string,
+  token: string,
+  videoUrl: string
+): Promise<string> {
+  const vidRes = await fetch(videoUrl);
+  if (!vidRes.ok) throw new Error(`Falha ao baixar vídeo para upload (${vidRes.status})`);
+  const vidBuffer = await vidRes.arrayBuffer();
+  const contentType = vidRes.headers.get("content-type") ?? "video/mp4";
+
+  const form = new FormData();
+  form.append("access_token", token);
+  form.append("source", new Blob([vidBuffer], { type: contentType }), "upload.mp4");
+
+  const res = await fetch(`${META_API}/${accountId}/advideos`, { method: "POST", body: form });
+  const json = await res.json() as Record<string, unknown>;
+  if (!res.ok || json.error) {
+    const err = json.error as {
+      message?: string; error_user_msg?: string;
+      code?: number; error_subcode?: number; fbtrace_id?: string;
+    } | undefined;
+    const base = err?.error_user_msg ?? err?.message ?? `Meta API error ${res.status}`;
+    const detail = [
+      err?.code != null ? `code ${err.code}` : null,
+      err?.error_subcode != null ? `subcode ${err.error_subcode}` : null,
+      err?.fbtrace_id ? `trace ${err.fbtrace_id}` : null,
+    ].filter(Boolean).join(", ");
+    throw new Error(detail ? `${base} (${detail})` : base);
+  }
+  const id = json.id as string | undefined;
+  if (!id) throw new Error("video_id não retornado");
+  return id;
+}
+
+// A Meta processa o vídeo de forma assíncrona — o creative só pode referenciar o
+// video_id depois que o status virar "ready". Poll simples com timeout.
+export async function waitForVideoReady(
+  videoId: string,
+  token: string,
+  timeoutMs = 180000
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await metaGet(videoId, token, { fields: "status" });
+    const videoStatus = (res.status as { video_status?: string } | undefined)?.video_status;
+    if (videoStatus === "ready") return;
+    if (videoStatus === "error") throw new Error("Processamento do vídeo falhou na Meta");
+    await sleep(3000);
+  }
+  throw new Error("Timeout aguardando a Meta processar o vídeo");
+}
+
 // Search interests → returns [{id, name}]
 // IMPORTANTE: o endpoint de busca da Meta devolve campos extras
 // (audience_size_lower_bound, audience_size_upper_bound, path, topic…).
@@ -209,8 +268,12 @@ export async function createAdset(
     publisher_platforms?: string[];
     facebook_positions?: string[];
     instagram_positions?: string[];
+    messenger_positions?: string[];
+    audience_network_positions?: string[];
+    threads_positions?: string[];
+    whatsapp_positions?: string[];
     destination_type?: string;
-    promoted_object?: { page_id?: string };
+    promoted_object?: { page_id?: string; whatsapp_phone_number?: string };
   }
 ): Promise<string> {
   // Geo resolvido (cidades → key, países → ISO) e idade dentro dos limites da Meta (13–65)
@@ -227,6 +290,11 @@ export async function createAdset(
     age_min: ageMin,
     age_max: ageMax,
     genders,
+    // O assistente do Ads Manager sempre grava esse campo (mesmo pra "Todos os
+    // dispositivos"); conjuntos criados via API sem ele têm o mesmo comportamento de
+    // entrega, mas a tela de edição do Ads Manager pode depender da presença dele pra
+    // hidratar corretamente os checkboxes de posicionamento — teste 2026-07-02.
+    device_platforms: ["mobile", "desktop"],
   };
 
   if (params.targeting.resolved_interests.length > 0) {
@@ -240,6 +308,10 @@ export async function createAdset(
     targeting.publisher_platforms = params.publisher_platforms;
     if (params.facebook_positions) targeting.facebook_positions = params.facebook_positions;
     if (params.instagram_positions) targeting.instagram_positions = params.instagram_positions;
+    if (params.messenger_positions) targeting.messenger_positions = params.messenger_positions;
+    if (params.audience_network_positions) targeting.audience_network_positions = params.audience_network_positions;
+    if (params.threads_positions) targeting.threads_positions = params.threads_positions;
+    if (params.whatsapp_positions) targeting.whatsapp_positions = params.whatsapp_positions;
   }
 
   // targeting_automation DENTRO do targeting (subcode 1870227):
@@ -262,7 +334,16 @@ export async function createAdset(
     };
     if (params.end_time) b.end_time = params.end_time;
     if (params.destination_type) b.destination_type = params.destination_type;
-    if (params.promoted_object?.page_id) b.promoted_object = { page_id: params.promoted_object.page_id };
+    if (params.promoted_object?.page_id) {
+      // whatsapp_phone_number é o campo que de fato controla pra qual número o clique
+      // "Enviar mensagem" abre — o link wa.me no creative NÃO manda nisso pra
+      // destination_type=WHATSAPP. Sem esse campo a Meta cai no número padrão já
+      // conectado à página, ignorando silenciosamente qualquer número informado
+      // (confirmado comparando com um adset feito manualmente no Ads Manager, 2026-07-02).
+      b.promoted_object = params.promoted_object.whatsapp_phone_number
+        ? { page_id: params.promoted_object.page_id, whatsapp_phone_number: params.promoted_object.whatsapp_phone_number }
+        : { page_id: params.promoted_object.page_id };
+    }
     return b;
   };
 
@@ -285,16 +366,21 @@ export async function createAdset(
   }
 }
 
+export type CreativeMedia =
+  | { type: "image"; image_hashes: string[] }   // 1 = imagem única, 2+ = carrossel
+  | { type: "video"; video_id: string; thumbnail_url: string };
+
 // Create ad creative → returns creative_id
-// 1 imagem  → criativo de imagem única
-// 2+ imagens → criativo em carrossel (child_attachments), copy compartilhada entre os cartões
+// media.type="image", 1 hash  → criativo de imagem única
+// media.type="image", 2+ hash → criativo em carrossel (child_attachments), copy compartilhada entre os cartões
+// media.type="video"          → criativo de vídeo único (video_data)
 export async function createAdCreative(
   accountId: string,
   token: string,
   params: {
     name: string;
     page_id: string;
-    image_hashes: string[];
+    media: CreativeMedia;
     title: string;
     body: string;
     description: string;
@@ -313,41 +399,54 @@ export async function createAdCreative(
       : { link: params.link },
   };
 
-  let linkData: Record<string, unknown>;
+  let objectStorySpec: Record<string, unknown>;
 
-  if (params.image_hashes.length > 1) {
-    // Carrossel
-    linkData = {
-      link: destLink,
-      message: params.body,
-      multi_share_optimized: true,
-      multi_share_end_card: false,
-      child_attachments: params.image_hashes.map((hash) => ({
+  if (params.media.type === "video") {
+    objectStorySpec = {
+      page_id: params.page_id,
+      video_data: {
+        video_id: params.media.video_id,
+        image_url: params.media.thumbnail_url,
+        title: params.title,
+        message: params.body,
+        link_description: params.description,
+        call_to_action: callToAction,
+      },
+    };
+  } else {
+    let linkData: Record<string, unknown>;
+    if (params.media.image_hashes.length > 1) {
+      // Carrossel
+      linkData = {
         link: destLink,
-        image_hash: hash,
+        message: params.body,
+        multi_share_optimized: true,
+        multi_share_end_card: false,
+        child_attachments: params.media.image_hashes.map((hash) => ({
+          link: destLink,
+          image_hash: hash,
+          name: params.title,
+          description: params.description,
+          call_to_action: callToAction,
+        })),
+      };
+    } else {
+      // Imagem única
+      linkData = {
+        image_hash: params.media.image_hashes[0],
+        link: destLink,
+        message: params.body,
         name: params.title,
         description: params.description,
         call_to_action: callToAction,
-      })),
-    };
-  } else {
-    // Imagem única
-    linkData = {
-      image_hash: params.image_hashes[0],
-      link: destLink,
-      message: params.body,
-      name: params.title,
-      description: params.description,
-      call_to_action: callToAction,
-    };
+      };
+    }
+    objectStorySpec = { page_id: params.page_id, link_data: linkData };
   }
 
   const res = await metaPost(`${accountId}/adcreatives`, token, {
     name: params.name,
-    object_story_spec: {
-      page_id: params.page_id,
-      link_data: linkData,
-    },
+    object_story_spec: objectStorySpec,
   });
   const id = res.id as string | undefined;
   if (!id) throw new Error("creative_id não retornado");

@@ -2,13 +2,16 @@ import { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
   uploadAdImage,
+  uploadAdVideo,
+  waitForVideoReady,
   searchInterests,
   createCampaign,
   createAdset,
   createAdCreative,
   createAd,
+  type CreativeMedia,
 } from "@/lib/meta-ads-create";
-import type { AdPlan, ExecuteResult, ExecuteAdsetResult, AgentFormData } from "@/types";
+import type { AdPlan, AdPlanCreative, ExecuteResult, ExecuteAdsetResult, AgentFormData } from "@/types";
 
 const USE_MOCK = process.env.MOCK_AGENT === "true";
 
@@ -61,11 +64,8 @@ export async function POST(req: NextRequest) {
             send({ type: "group_start", group_id: gid, group_name: adset.name });
 
             const steps = [
-              { step: "upload_image", label: `Enviando ${adset.creative.image_urls.length} imagem(ns)...`, doneLabel: `${adset.creative.image_urls.length} imagem(ns) enviada(s)`, value: `mock_hash_${i}` },
               { step: "search_interests", label: "Buscando interesses...", doneLabel: "Interesses encontrados" },
               { step: "create_adset", label: "Criando conjunto...", doneLabel: "Conjunto criado", value: `20000000000${i}` },
-              { step: "create_creative", label: adset.creative.image_urls.length > 1 ? "Criando carrossel..." : "Criando criativo...", doneLabel: "Criativo criado", value: `30000000000${i}` },
-              { step: "create_ad", label: "Criando anúncio...", doneLabel: "Anúncio criado (pausado)", value: `40000000000${i}` },
             ];
 
             for (const s of steps) {
@@ -74,7 +74,30 @@ export async function POST(req: NextRequest) {
               send({ type: "step", step: s.step, status: "done", label: s.doneLabel, value: s.value, group_id: gid });
             }
 
-            adsetResults.push({ name: adset.name, adset_id: `20000000000${i}`, creative_id: `30000000000${i}`, ad_id: `40000000000${i}` });
+            const mockAds: Array<{ creative_id: string; ad_id: string }> = [];
+            for (let j = 0; j < adset.creatives.length; j++) {
+              const cr = adset.creatives[j];
+              const isVideo = cr.media_type === "video";
+              const label = adset.creatives.length > 1 ? ` (criativo ${j + 1}/${adset.creatives.length})` : "";
+
+              send({ type: "step", step: "upload_media", status: "start", label: `Enviando ${isVideo ? "vídeo" : `${cr.image_urls.length} imagem(ns)`}${label}...`, group_id: gid });
+              await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
+              send({ type: "step", step: "upload_media", status: "done", label: `Mídia enviada${label}`, value: `mock_media_${i}_${j}`, group_id: gid });
+
+              send({ type: "step", step: "create_creative", status: "start", label: `${isVideo ? "Criando criativo de vídeo" : cr.image_urls.length > 1 ? "Criando carrossel" : "Criando criativo"}${label}...`, group_id: gid });
+              await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
+              const creativeId = `30000000000${i}${j}`;
+              send({ type: "step", step: "create_creative", status: "done", label: `Criativo criado${label}`, value: creativeId, group_id: gid });
+
+              send({ type: "step", step: "create_ad", status: "start", label: `Criando anúncio${label}...`, group_id: gid });
+              await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
+              const adId = `40000000000${i}${j}`;
+              send({ type: "step", step: "create_ad", status: "done", label: `Anúncio criado (pausado)${label}`, value: adId, group_id: gid });
+
+              mockAds.push({ creative_id: creativeId, ad_id: adId });
+            }
+
+            adsetResults.push({ name: adset.name, adset_id: `20000000000${i}`, ads: mockAds });
           }
 
           result = { account_id: accountIds[0], account_name: accountName, campaign_id: campaignId, adsets: adsetResults };
@@ -105,7 +128,9 @@ export async function POST(req: NextRequest) {
               .insert({
                 account_id: formData.account_ids[0] ?? dbId ?? null,
                 form_data: formData,
-                image_url: formData.audiences[0]?.images[0]?.url ?? null,
+                image_url: formData.audiences[0]?.creatives[0]?.images[0]?.url
+                  ?? formData.audiences[0]?.creatives[0]?.video_thumbnail?.url
+                  ?? null,
                 status: "running",
                 started_at: new Date().toISOString(),
               })
@@ -136,17 +161,8 @@ export async function POST(req: NextRequest) {
           const gid = String(i);
           send({ type: "group_start", group_id: gid, group_name: adset.name });
 
-          let currentStep = "upload_image";
+          let currentStep = "search_interests";
           try {
-            // Upload das imagens desse público → hashes
-            send({ type: "step", step: "upload_image", status: "start", label: `Enviando ${adset.creative.image_urls.length} imagem(ns) para a Meta...`, group_id: gid });
-            const imageHashes: string[] = [];
-            for (const url of adset.creative.image_urls) {
-              imageHashes.push(await uploadAdImage(metaAccountId, token, url));
-            }
-            if (imageHashes.length === 0) throw new Error("Nenhuma imagem para este público");
-            send({ type: "step", step: "upload_image", status: "done", label: `${imageHashes.length} imagem(ns) enviada(s)`, value: imageHashes[0], group_id: gid });
-
             // Interesses
             send({ type: "step", step: "search_interests", status: "start", label: "Buscando interesses de público...", group_id: gid });
             const resolvedInterests: Array<{ id: string; name: string }> = [];
@@ -156,7 +172,8 @@ export async function POST(req: NextRequest) {
             }
             send({ type: "step", step: "search_interests", status: "done", label: `${resolvedInterests.length} interesses encontrados`, group_id: gid });
 
-            // Adset (sem budget — CBO na campanha)
+            // Adset (sem budget — CBO na campanha). Criado UMA VEZ; os criativos deste
+            // público (1 ou mais) viram vários anúncios dentro do mesmo conjunto.
             currentStep = "create_adset";
             send({ type: "step", step: "create_adset", status: "start", label: "Criando conjunto de anúncios...", group_id: gid });
             const adsetId = await createAdset(metaAccountId, token, campaignId, {
@@ -175,39 +192,74 @@ export async function POST(req: NextRequest) {
               publisher_platforms: adset.targeting.publisher_platforms,
               facebook_positions: adset.targeting.facebook_positions,
               instagram_positions: adset.targeting.instagram_positions,
+              messenger_positions: adset.targeting.messenger_positions,
+              audience_network_positions: adset.targeting.audience_network_positions,
+              threads_positions: adset.targeting.threads_positions,
+              whatsapp_positions: adset.targeting.whatsapp_positions,
               destination_type: adset.destination_type,
               promoted_object: adset.promoted_object,
             });
             send({ type: "step", step: "create_adset", status: "done", label: "Conjunto de anúncios criado", value: adsetId, group_id: gid });
 
-            // Criativo (carrossel se 2+ imagens)
-            const isCarousel = imageHashes.length > 1;
-            currentStep = "create_creative";
-            send({ type: "step", step: "create_creative", status: "start", label: isCarousel ? "Criando criativo em carrossel..." : "Criando criativo do anúncio...", group_id: gid });
-            const creativeId = await createAdCreative(metaAccountId, token, {
-              name: adset.creative.name,
-              page_id: adset.creative.page_id,
-              image_hashes: imageHashes,
-              title: adset.creative.title,
-              body: adset.creative.body,
-              description: adset.creative.description,
-              call_to_action_type: adset.creative.call_to_action_type,
-              link: adset.creative.link,
-              whatsapp_link: adset.creative.whatsapp_link,
-            });
-            send({ type: "step", step: "create_creative", status: "done", label: isCarousel ? "Carrossel criado" : "Criativo criado", value: creativeId, group_id: gid });
+            const ads: Array<{ creative_id: string; ad_id: string }> = [];
 
-            // Anúncio
-            currentStep = "create_ad";
-            send({ type: "step", step: "create_ad", status: "start", label: "Criando anúncio...", group_id: gid });
-            const adId = await createAd(metaAccountId, token, {
-              name: adset.name,
-              adset_id: adsetId,
-              creative_id: creativeId,
-            });
-            send({ type: "step", step: "create_ad", status: "done", label: "Anúncio criado (pausado)", value: adId, group_id: gid });
+            for (let j = 0; j < adset.creatives.length; j++) {
+              const creative: AdPlanCreative = adset.creatives[j];
+              const tag = adset.creatives.length > 1 ? ` (criativo ${j + 1}/${adset.creatives.length})` : "";
+              const isVideo = creative.media_type === "video";
 
-            adsetResults.push({ name: adset.name, adset_id: adsetId, creative_id: creativeId, ad_id: adId });
+              // Upload da mídia deste criativo
+              currentStep = "upload_media";
+              let media: CreativeMedia;
+              if (isVideo) {
+                send({ type: "step", step: "upload_media", status: "start", label: `Enviando vídeo${tag}...`, group_id: gid });
+                const videoId = await uploadAdVideo(metaAccountId, token, creative.video_url ?? "");
+                send({ type: "step", step: "upload_media", status: "start", label: `Processando vídeo na Meta${tag}...`, group_id: gid });
+                await waitForVideoReady(videoId, token);
+                send({ type: "step", step: "upload_media", status: "done", label: `Vídeo pronto${tag}`, value: videoId, group_id: gid });
+                media = { type: "video", video_id: videoId, thumbnail_url: creative.video_thumbnail_url ?? "" };
+              } else {
+                send({ type: "step", step: "upload_media", status: "start", label: `Enviando ${creative.image_urls.length} imagem(ns)${tag}...`, group_id: gid });
+                const imageHashes: string[] = [];
+                for (const url of creative.image_urls) {
+                  imageHashes.push(await uploadAdImage(metaAccountId, token, url));
+                }
+                if (imageHashes.length === 0) throw new Error("Nenhuma imagem para este criativo");
+                send({ type: "step", step: "upload_media", status: "done", label: `${imageHashes.length} imagem(ns) enviada(s)${tag}`, value: imageHashes[0], group_id: gid });
+                media = { type: "image", image_hashes: imageHashes };
+              }
+
+              // Criativo (carrossel se 2+ imagens, vídeo se media_type=video)
+              const isCarousel = media.type === "image" && media.image_hashes.length > 1;
+              currentStep = "create_creative";
+              send({ type: "step", step: "create_creative", status: "start", label: `${isVideo ? "Criando criativo de vídeo" : isCarousel ? "Criando criativo em carrossel" : "Criando criativo do anúncio"}${tag}...`, group_id: gid });
+              const creativeId = await createAdCreative(metaAccountId, token, {
+                name: creative.name,
+                page_id: creative.page_id,
+                media,
+                title: creative.title,
+                body: creative.body,
+                description: creative.description,
+                call_to_action_type: creative.call_to_action_type,
+                link: creative.link,
+                whatsapp_link: creative.whatsapp_link,
+              });
+              send({ type: "step", step: "create_creative", status: "done", label: `${isVideo ? "Criativo de vídeo criado" : isCarousel ? "Carrossel criado" : "Criativo criado"}${tag}`, value: creativeId, group_id: gid });
+
+              // Anúncio
+              currentStep = "create_ad";
+              send({ type: "step", step: "create_ad", status: "start", label: `Criando anúncio${tag}...`, group_id: gid });
+              const adId = await createAd(metaAccountId, token, {
+                name: creative.name,
+                adset_id: adsetId,
+                creative_id: creativeId,
+              });
+              send({ type: "step", step: "create_ad", status: "done", label: `Anúncio criado (pausado)${tag}`, value: adId, group_id: gid });
+
+              ads.push({ creative_id: creativeId, ad_id: adId });
+            }
+
+            adsetResults.push({ name: adset.name, adset_id: adsetId, ads });
           } catch (adsetErr) {
             const errMsg = String(adsetErr instanceof Error ? adsetErr.message : adsetErr);
             overallStatus = adsetResults.length > 0 ? "partial" : "failed";
@@ -236,6 +288,7 @@ export async function POST(req: NextRequest) {
       } finally {
         if (runId) {
           const firstAdset = result?.adsets[0];
+          const firstAd = firstAdset?.ads[0];
           await supabaseAdmin
             .from("agent_runs")
             .update({
@@ -243,8 +296,8 @@ export async function POST(req: NextRequest) {
               error_log: errorLog ?? null,
               meta_campaign_id: result?.campaign_id ?? null,
               meta_adset_id: firstAdset?.adset_id ?? null,
-              meta_creative_id: firstAdset?.creative_id ?? null,
-              meta_ad_id: firstAdset?.ad_id ?? null,
+              meta_creative_id: firstAd?.creative_id ?? null,
+              meta_ad_id: firstAd?.ad_id ?? null,
               finished_at: new Date().toISOString(),
             })
             .eq("id", runId);

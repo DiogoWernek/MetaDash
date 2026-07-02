@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { AdPlan, AdPlanAdset } from "@/types";
+import type { AdPlan, AdPlanCreative } from "@/types";
 
 const CTA_LABELS: Record<string, string> = {
   LEARN_MORE: "Saiba Mais",
@@ -22,6 +22,7 @@ const CTA_LABELS: Record<string, string> = {
   BOOK_NOW: "Reserve Agora",
   GET_QUOTE: "Solicitar Orçamento",
   WHATSAPP_MESSAGE: "Enviar mensagem (WhatsApp)",
+  MESSAGE_PAGE: "Enviar mensagem",
 };
 
 const OBJECTIVE_LABELS: Record<string, string> = {
@@ -30,6 +31,34 @@ const OBJECTIVE_LABELS: Record<string, string> = {
   OUTCOME_SALES: "Vendas",
   OUTCOME_AWARENESS: "Reconhecimento de Marca",
   OUTCOME_ENGAGEMENT: "Engajamento",
+};
+
+const DESTINATION_TYPE_LABELS: Record<string, string> = {
+  WHATSAPP: "WhatsApp",
+  MESSENGER: "Messenger",
+  INSTAGRAM_DIRECT: "Instagram",
+  MESSAGING_MESSENGER_WHATSAPP: "Messenger + WhatsApp",
+  MESSAGING_INSTAGRAM_DIRECT_WHATSAPP: "Instagram + WhatsApp",
+  MESSAGING_INSTAGRAM_DIRECT_MESSENGER: "Instagram + Messenger",
+  MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP: "Instagram + Messenger + WhatsApp",
+};
+
+const OPTIMIZATION_GOAL_LABELS: Record<string, string> = {
+  CONVERSATIONS: "Conversas",
+  LEAD_GENERATION: "Leads por mensagens",
+  LINK_CLICKS: "Cliques no link",
+  OFFSITE_CONVERSIONS: "Conversões",
+  POST_ENGAGEMENT: "Engajamento",
+  REACH: "Alcance",
+};
+
+const PLATFORM_LABELS: Record<string, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  audience_network: "Audience Network",
+  messenger: "Messenger",
+  whatsapp: "WhatsApp",
+  threads: "Threads",
 };
 
 function formatBudget(cents: number | null | undefined): string {
@@ -81,15 +110,16 @@ function buildPlanText(plan: AdPlan): string {
 
   plan.adsets.forEach((adset, i) => {
     const t = adset.targeting;
-    const cr = adset.creative;
-    const isCarousel = cr.image_urls.length > 1;
 
     lines.push("");
     lines.push("───────────────────────────────────────────");
     lines.push(`CONJUNTO ${i + 1}: ${adset.name}`);
     lines.push("───────────────────────────────────────────");
-    lines.push(`Meta de otimização: ${adset.optimization_goal}`);
+    lines.push(`Meta de otimização: ${OPTIMIZATION_GOAL_LABELS[adset.optimization_goal] ?? adset.optimization_goal}`);
     lines.push(`Evento de cobrança: ${adset.billing_event}`);
+    if (adset.destination_type) {
+      lines.push(`Destino de conversão (mensagens): ${DESTINATION_TYPE_LABELS[adset.destination_type] ?? adset.destination_type}`);
+    }
 
     lines.push("");
     lines.push("PÚBLICO:");
@@ -98,23 +128,36 @@ function buildPlanText(plan: AdPlan): string {
     lines.push(`  Gênero: ${genderLabelFor(t.genders)}`);
     const interests = (t.interests ?? []).map((it) => it.name);
     lines.push(`  Interesses: ${interests.length ? interests.join(", ") : "Sem interesses"}`);
-    const placements = t.publisher_platforms?.length ? t.publisher_platforms.join(", ") : "Automático (Advantage+)";
+    const placements = t.publisher_platforms?.length
+      ? t.publisher_platforms.map((p) => PLATFORM_LABELS[p] ?? p).join(", ")
+      : "Automático (Advantage+)";
     lines.push(`  Posicionamentos: ${placements}`);
 
-    lines.push("");
-    lines.push(`ANÚNCIO${isCarousel ? ` (Carrossel · ${cr.image_urls.length} imagens)` : ""}:`);
-    lines.push(`  Título: ${cr.title}`);
-    lines.push(`  Texto principal: ${cr.body}`);
-    lines.push(`  Descrição: ${cr.description}`);
-    lines.push(`  Botão (CTA): ${CTA_LABELS[cr.call_to_action_type] ?? cr.call_to_action_type}`);
-    lines.push(`  URL de destino: ${cr.link || "—"}`);
-    if (adset.destination_type === "WHATSAPP") {
-      lines.push(`  Destino do clique: WhatsApp${cr.whatsapp_link ? ` — ${cr.whatsapp_link}` : ""}`);
-    }
-    lines.push(`  Page ID: ${cr.page_id || "—"}`);
-    lines.push(`  ${isCarousel ? "Imagens" : "Imagem"}:`);
-    cr.image_urls.forEach((url, idx) => {
-      lines.push(`    ${idx + 1}. ${url}`);
+    adset.creatives.forEach((cr, j) => {
+      const isVideo = cr.media_type === "video";
+      const isCarousel = !isVideo && cr.image_urls.length > 1;
+      const tag = adset.creatives.length > 1 ? ` ${j + 1}` : "";
+
+      lines.push("");
+      lines.push(`ANÚNCIO${tag}${isVideo ? " (Vídeo)" : isCarousel ? ` (Carrossel · ${cr.image_urls.length} imagens)` : ""}:`);
+      lines.push(`  Título: ${cr.title}`);
+      lines.push(`  Texto principal: ${cr.body}`);
+      lines.push(`  Descrição: ${cr.description}`);
+      lines.push(`  Botão (CTA): ${CTA_LABELS[cr.call_to_action_type] ?? cr.call_to_action_type}`);
+      lines.push(`  URL de destino: ${cr.link || "—"}`);
+      if (cr.call_to_action_type === "WHATSAPP_MESSAGE") {
+        lines.push(`  Destino do clique: WhatsApp${cr.whatsapp_link ? ` — ${cr.whatsapp_link}` : ""}`);
+      }
+      lines.push(`  Page ID: ${cr.page_id || "—"}`);
+      if (isVideo) {
+        lines.push(`  Vídeo: ${cr.video_url || "—"}`);
+        lines.push(`  Capa: ${cr.video_thumbnail_url || "—"}`);
+      } else {
+        lines.push(`  ${isCarousel ? "Imagens" : "Imagem"}:`);
+        cr.image_urls.forEach((url, idx) => {
+          lines.push(`    ${idx + 1}. ${url}`);
+        });
+      }
     });
   });
 
@@ -224,10 +267,14 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
   const setCampaign = (field: keyof AdPlan["campaign"], value: unknown) =>
     setEdited((prev) => ({ ...prev, campaign: { ...prev.campaign, [field]: value } }));
 
-  const setCreative = (i: number, field: keyof AdPlanAdset["creative"], value: unknown) =>
+  const setCreative = (adsetIndex: number, creativeIndex: number, field: keyof AdPlanCreative, value: unknown) =>
     setEdited((prev) => ({
       ...prev,
-      adsets: prev.adsets.map((a, idx) => (idx === i ? { ...a, creative: { ...a.creative, [field]: value } } : a)),
+      adsets: prev.adsets.map((a, idx) =>
+        idx === adsetIndex
+          ? { ...a, creatives: a.creatives.map((c, ci) => (ci === creativeIndex ? { ...c, [field]: value } : c)) }
+          : a
+      ),
     }));
 
   const setAdsetName = (i: number, value: string) =>
@@ -248,7 +295,7 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
 
   const startInput = toLocalInput(edited.adsets[0]?.start_time);
   const endInput = toLocalInput(edited.adsets[0]?.end_time);
-  const missingPageId = edited.adsets.some((a) => !a.creative.page_id);
+  const missingPageId = edited.adsets.some((a) => a.creatives.some((c) => !c.page_id));
 
   return (
     <div className="space-y-4">
@@ -300,7 +347,6 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
           const genderLabel = adset.targeting.genders.includes(0)
             ? "Todos"
             : adset.targeting.genders.map((g) => (g === 1 ? "Masculino" : "Feminino")).join(" + ");
-          const isCarousel = adset.creative.image_urls.length > 1;
 
           return (
             <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
@@ -309,12 +355,12 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
                 <span className="text-xs font-semibold">Público {i + 1}</span>
                 <Badge variant="outline" className="text-[10px] gap-1 ml-auto">
                   <Images className="h-2.5 w-2.5" />
-                  {isCarousel ? `Carrossel · ${adset.creative.image_urls.length}` : "Imagem única"}
+                  {adset.creatives.length} criativo{adset.creatives.length !== 1 ? "s" : ""}
                 </Badge>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 p-4">
-                {/* Esquerda: público */}
+                {/* Esquerda: público, conversão e posicionamento */}
                 <div className="xl:col-span-3 space-y-3">
                   <EditableField label="Nome do conjunto" value={adset.name} onChange={(v) => setAdsetName(i, v)} />
 
@@ -346,75 +392,116 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
                       )}
                     </div>
                   </div>
-                </div>
 
-                {/* Direita: criativo */}
-                <div className="xl:col-span-2 space-y-3">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
-                      <ImageIcon className="h-3 w-3" />
-                      {isCarousel ? "Imagens do carrossel" : "Imagem"}
+                      <LayoutGrid className="h-3 w-3" />Posicionamento
                     </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {adset.creative.image_urls.map((url, idx) => (
-                        <div key={idx} className="relative rounded-lg overflow-hidden border border-border">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={url} alt={`Imagem ${idx + 1}`} className="w-full h-20 object-cover" />
-                          {isCarousel && (
-                            <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{idx + 1}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                    {adset.targeting.publisher_platforms?.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {adset.targeting.publisher_platforms.map((p) => (
+                          <Badge key={p} variant="outline" className="text-xs">{PLATFORM_LABELS[p] ?? p}</Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                        <p className="text-xs">Automático (Advantage+)</p>
+                      </div>
+                    )}
                   </div>
-
-                  <EditableField label="Título" value={adset.creative.title} onChange={(v) => setCreative(i, "title", v)} maxLength={40} />
-                  <EditableField label="Texto principal" value={adset.creative.body} onChange={(v) => setCreative(i, "body", v)} maxLength={125} multiline />
-                  <EditableField label="Descrição" value={adset.creative.description} onChange={(v) => setCreative(i, "description", v)} maxLength={30} />
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Botão (CTA)</p>
-                      <Badge variant="outline" className="text-xs">{CTA_LABELS[adset.creative.call_to_action_type] ?? adset.creative.call_to_action_type}</Badge>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Meta de otimização</p>
+                      <Badge variant="outline" className="text-xs">{OPTIMIZATION_GOAL_LABELS[adset.optimization_goal] ?? adset.optimization_goal}</Badge>
                     </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Page ID</p>
-                      <p className="text-xs font-mono text-muted-foreground">{adset.creative.page_id || "—"}</p>
-                    </div>
+                    {adset.destination_type && (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Destino da conversão</p>
+                        <Badge variant="outline" className="text-xs border-success/40 text-success">
+                          {DESTINATION_TYPE_LABELS[adset.destination_type] ?? adset.destination_type}
+                        </Badge>
+                      </div>
+                    )}
                   </div>
+                </div>
 
-                  <EditableField label="URL de destino" value={adset.creative.link} onChange={(v) => setCreative(i, "link", v)} type="url" />
+                {/* Direita: criativos (um público pode ter vários) */}
+                <div className="xl:col-span-2 space-y-4">
+                  {adset.creatives.map((creative, j) => {
+                    const isVideo = creative.media_type === "video";
+                    const isCarousel = !isVideo && creative.image_urls.length > 1;
+                    return (
+                      <div key={j} className={cn("space-y-3", adset.creatives.length > 1 && j > 0 && "pt-3 border-t border-border/50")}>
+                        {adset.creatives.length > 1 && (
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Criativo {j + 1}</p>
+                        )}
 
-                  {adset.destination_type === "WHATSAPP" && (
-                    <div className="rounded-md border border-success/30 bg-success/5 px-2.5 py-1.5">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-success mb-0.5">Destino do clique</p>
-                      <p className="text-xs text-foreground">
-                        WhatsApp{adset.creative.whatsapp_link ? ` · +${adset.creative.whatsapp_link.replace(/\D/g, "")}` : ""}
-                      </p>
-                    </div>
-                  )}
+                        <EditableField label="Nome do criativo" value={creative.name} onChange={(v) => setCreative(i, j, "name", v)} />
+
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
+                            <ImageIcon className="h-3 w-3" />
+                            {isVideo ? "Vídeo" : isCarousel ? "Imagens do carrossel" : "Imagem"}
+                          </p>
+                          {isVideo ? (
+                            creative.video_thumbnail_url && (
+                              <div className="relative rounded-lg overflow-hidden border border-border w-1/2">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={creative.video_thumbnail_url} alt="Capa do vídeo" className="w-full h-20 object-cover" />
+                                <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">Capa</span>
+                              </div>
+                            )
+                          ) : (
+                            <div className="grid grid-cols-3 gap-2">
+                              {creative.image_urls.map((url, idx) => (
+                                <div key={idx} className="relative rounded-lg overflow-hidden border border-border">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={url} alt={`Imagem ${idx + 1}`} className="w-full h-20 object-cover" />
+                                  {isCarousel && (
+                                    <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{idx + 1}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <EditableField label="Título" value={creative.title} onChange={(v) => setCreative(i, j, "title", v)} maxLength={40} />
+                        <EditableField label="Texto principal" value={creative.body} onChange={(v) => setCreative(i, j, "body", v)} maxLength={125} multiline />
+                        <EditableField label="Descrição" value={creative.description} onChange={(v) => setCreative(i, j, "description", v)} maxLength={30} />
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Botão (CTA)</p>
+                            <Badge variant="outline" className="text-xs">{CTA_LABELS[creative.call_to_action_type] ?? creative.call_to_action_type}</Badge>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Page ID</p>
+                            <p className="text-xs font-mono text-muted-foreground">{creative.page_id || "—"}</p>
+                          </div>
+                        </div>
+
+                        <EditableField label="URL de destino" value={creative.link} onChange={(v) => setCreative(i, j, "link", v)} type="url" />
+
+                        {creative.call_to_action_type === "WHATSAPP_MESSAGE" && (
+                          <div className="rounded-md border border-success/30 bg-success/5 px-2.5 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-success mb-0.5">Destino do clique</p>
+                            <p className="text-xs text-foreground">
+                              WhatsApp{creative.whatsapp_link ? ` · +${creative.whatsapp_link.replace(/\D/g, "")}` : ""}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           );
         })}
       </div>
-
-      {/* Placements (do primeiro adset, uniforme) */}
-      <ReviewSection icon={<LayoutGrid className="h-3.5 w-3.5" />} title="Posicionamentos">
-        {edited.adsets[0]?.targeting.publisher_platforms ? (
-          <div className="flex flex-wrap gap-1.5">
-            {edited.adsets[0].targeting.publisher_platforms!.map((p) => (
-              <Badge key={p} variant="outline" className="text-xs">{p}</Badge>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-success" />
-            <p className="text-sm">Automático (Advantage+) — Meta otimiza os posicionamentos</p>
-          </div>
-        )}
-      </ReviewSection>
 
       {/* Warning page_id */}
       {missingPageId && (

@@ -485,24 +485,32 @@ export default function AgentePage() {
                 </div>
 
                 {/* Públicos */}
-                {execResult.adsets.map((ad, i) => (
+                {execResult.adsets.map((adset, i) => (
                   <div key={i} className="rounded-md border border-border bg-muted/20 p-2.5 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <div className="flex h-4 w-4 items-center justify-center rounded bg-meta-blue/10 text-meta-blue text-[10px] font-bold">{i + 1}</div>
-                      <span className="text-xs font-medium truncate">{ad.name}</span>
+                      <span className="text-xs font-medium truncate">{adset.name}</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[
-                        { label: "Conjunto", value: ad.adset_id },
-                        { label: "Criativo", value: ad.creative_id },
-                        { label: "Anúncio", value: ad.ad_id },
-                      ].map((item) => (
-                        <div key={item.label} className="rounded border border-border bg-card px-2 py-1">
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{item.label}</p>
-                          <p className="text-[11px] font-mono text-foreground truncate">{item.value}</p>
+                    <div className="rounded border border-border bg-card px-2 py-1">
+                      <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Conjunto</p>
+                      <p className="text-[11px] font-mono text-foreground truncate">{adset.adset_id}</p>
+                    </div>
+                    {adset.ads.map((ad, j) => (
+                      <div key={j} className="grid grid-cols-2 gap-1.5">
+                        <div className="rounded border border-border bg-card px-2 py-1">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
+                            Criativo{adset.ads.length > 1 ? ` ${j + 1}` : ""}
+                          </p>
+                          <p className="text-[11px] font-mono text-foreground truncate">{ad.creative_id}</p>
                         </div>
-                      ))}
-                    </div>
+                        <div className="rounded border border-border bg-card px-2 py-1">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
+                            Anúncio{adset.ads.length > 1 ? ` ${j + 1}` : ""}
+                          </p>
+                          <p className="text-[11px] font-mono text-foreground truncate">{ad.ad_id}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
 

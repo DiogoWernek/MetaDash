@@ -272,12 +272,49 @@ export type AdCta =
   | "BOOK_NOW"
   | "GET_QUOTE";
 
+// Canais de mensagem independentes — cada um marcável separadamente.
+// A combinação marcada mapeia deterministicamente para um destination_type da Meta
+// (ver buildDestinationType em app/api/agente/route.ts).
+export interface MessagingChannels {
+  whatsapp: boolean;
+  messenger: boolean;
+  instagram: boolean;
+}
+
+// Posicionamento — agora fica POR PÚBLICO (cada conjunto pode ter o seu).
+export interface PlacementSelection {
+  mode: "automatic" | "manual";
+  platforms: string[];                     // subconjunto de: facebook, instagram, audience_network, messenger, whatsapp, threads
+  facebook_positions?: string[];
+  instagram_positions?: string[];
+  messenger_positions?: string[];
+  audience_network_positions?: string[];
+  threads_positions?: string[];
+  whatsapp_positions?: string[];
+}
+
 export interface AudienceImage {
   url: string;       // URL pública (Supabase) usada na criação
   preview: string;   // URL para exibição no preview
 }
 
-// Um público-alvo conectado ao seu criativo (com uma ou mais imagens = carrossel)
+// Um criativo dentro de um público — um público pode ter vários (várias ads no mesmo adset)
+export interface AudienceCreativeItem {
+  id: string;
+  name: string;                     // nome próprio do criativo/anúncio — nunca herda o nome do conjunto
+  media_type: "image" | "video";
+  images: AudienceImage[];          // media_type="image": 1 = imagem única, 2+ = carrossel
+  video?: AudienceImage;            // media_type="video"
+  video_thumbnail?: AudienceImage;  // media_type="video" — capa exigida pela Meta (video_data.image_url)
+  headline: string;
+  primary_text: string;
+  description: string;
+  cta: AdCta;
+  destination_url: string;
+}
+
+// Um público-alvo — agora com posicionamento próprio, config de conversão por mensagens
+// (só relevante p/ objetivos Engajamento/Vendas) e uma lista de criativos.
 export interface AudienceCreative {
   id: string;                 // uid client-side para keys do React
   // Público
@@ -286,29 +323,27 @@ export interface AudienceCreative {
   age_min: number;
   age_max: number;
   genders: string[];
-  // Criativo (copy compartilhada entre as imagens/cartões)
-  headline: string;
-  primary_text: string;
-  description: string;
-  cta: AdCta;
-  destination_url: string;
-  // Imagens — 1 = imagem única, 2+ = carrossel
-  images: AudienceImage[];
+  // Conversão por mensagens (a nível de conjunto) — só objetivos Engajamento/Vendas
+  messaging_enabled: boolean;
+  messaging_channels: MessagingChannels;
+  performance_goal: string;            // value do dropdown de Meta de Desempenho (ver PERFORMANCE_GOALS)
+  // Posicionamento — a nível de conjunto
+  placement: PlacementSelection;
+  // Criativos deste público — 1 ou mais (botão "adicionar criativo")
+  creatives: AudienceCreativeItem[];
 }
 
 export interface AgentFormData {
   bm_id: string;
   account_ids: string[];   // uma conta selecionada
   facebook_page_id?: string;
-  whatsapp_number?: string; // objetivo Leads via Click-to-WhatsApp (DDI+DDD+número)
+  whatsapp_number?: string; // necessário quando algum público usa canal WhatsApp (Leads clássico ou Engajamento/Vendas via mensagens)
   campaign_name: string;
   objective: AdObjective;
   budget_type: "daily" | "total";
   budget_amount: number;   // orçamento da campanha (CBO)
   start_date: string;
   end_date?: string;
-  placements: "automatic" | "manual";
-  manual_placements: string[];
   audiences: AudienceCreative[];
 }
 
@@ -373,6 +408,10 @@ export interface AdPlanTargeting {
   publisher_platforms?: string[];
   facebook_positions?: string[];
   instagram_positions?: string[];
+  messenger_positions?: string[];
+  audience_network_positions?: string[];
+  threads_positions?: string[];
+  whatsapp_positions?: string[];
 }
 
 export interface AdPlanCreative {
@@ -383,8 +422,11 @@ export interface AdPlanCreative {
   call_to_action_type: string;
   link: string;
   page_id: string;
-  image_urls: string[];   // 1 = imagem única, 2+ = carrossel
-  whatsapp_link?: string; // destino do CTA quando call_to_action_type = WHATSAPP_MESSAGE
+  media_type: "image" | "video";
+  image_urls: string[];        // media_type="image": 1 = imagem única, 2+ = carrossel
+  video_url?: string;          // media_type="video" — origem a ser enviada para /advideos
+  video_thumbnail_url?: string; // media_type="video" — capa (video_data.image_url)
+  whatsapp_link?: string;      // destino do CTA quando call_to_action_type = WHATSAPP_MESSAGE
 }
 
 export interface AdPlanAdset {
@@ -393,10 +435,10 @@ export interface AdPlanAdset {
   end_time?: string;
   optimization_goal: string;
   billing_event: string;
-  destination_type?: string;             // ex.: "WHATSAPP" (Click-to-WhatsApp)
-  promoted_object?: { page_id?: string };
+  destination_type?: string;             // ex.: "WHATSAPP", "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP"
+  promoted_object?: { page_id?: string; whatsapp_phone_number?: string };
   targeting: AdPlanTargeting;
-  creative: AdPlanCreative;   // cada público tem seu próprio criativo
+  creatives: AdPlanCreative[];   // um público pode ter vários criativos (várias ads no mesmo adset)
 }
 
 export interface AdPlan {
@@ -424,11 +466,15 @@ export interface ExecuteStreamEvent {
   message?: string;
 }
 
+export interface ExecuteAdResult {
+  creative_id: string;
+  ad_id: string;
+}
+
 export interface ExecuteAdsetResult {
   name: string;
   adset_id: string;
-  creative_id: string;
-  ad_id: string;
+  ads: ExecuteAdResult[];   // um público pode ter vários criativos → vários anúncios no mesmo conjunto
 }
 
 export interface ExecuteResult {

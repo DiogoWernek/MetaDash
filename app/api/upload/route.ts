@@ -10,17 +10,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Arquivo não encontrado" }, { status: 400 });
     }
 
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png"];
+    const allowedImageTypes = ["image/jpeg", "image/jpg", "image/png"];
+    const allowedVideoTypes = ["video/mp4", "video/quicktime"];
+    const allowedTypes = [...allowedImageTypes, ...allowedVideoTypes];
     if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json({ error: "Apenas JPG e PNG são aceitos" }, { status: 400 });
+      return NextResponse.json({ error: "Apenas JPG, PNG (imagem) ou MP4/MOV (vídeo) são aceitos" }, { status: 400 });
     }
 
-    const maxSize = 30 * 1024 * 1024;
+    const isVideo = allowedVideoTypes.includes(file.type);
+    const maxSize = (isVideo ? 90 : 30) * 1024 * 1024;
     if (file.size > maxSize) {
-      return NextResponse.json({ error: "Arquivo deve ter menos de 30MB" }, { status: 400 });
+      return NextResponse.json({ error: `Arquivo deve ter menos de ${isVideo ? 90 : 30}MB` }, { status: 400 });
     }
 
-    const ext = file.type === "image/png" ? "png" : "jpg";
+    const extByType: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "video/mp4": "mp4",
+      "video/quicktime": "mov",
+    };
+    const ext = extByType[file.type] ?? "bin";
     const filename = `${crypto.randomUUID()}.${ext}`;
 
     const arrayBuffer = await file.arrayBuffer();

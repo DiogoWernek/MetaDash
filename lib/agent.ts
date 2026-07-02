@@ -41,19 +41,25 @@ A campanha usa CBO (Otimização de Orçamento da Campanha): o orçamento fica n
         "genders": [number],
         "interests": [{ "name": "string", "keyword": "string" }]
       },
-      "creative": {
-        "name": "string",
-        "title": "string — máx 40 chars",
-        "body": "string — máx 125 chars",
-        "description": "string — máx 30 chars",
-        "call_to_action_type": "string",
-        "link": "string",
-        "page_id": "string — valor recebido do formulário",
-        "image_urls": []
-      }
+      "creatives": [
+        {
+          "name": "string — placeholder, o sistema sempre sobrescreve com o nome que o usuário digitou no formulário",
+          "title": "string — máx 40 chars",
+          "body": "string — máx 125 chars",
+          "description": "string — máx 30 chars",
+          "call_to_action_type": "string",
+          "link": "string",
+          "page_id": "string — valor recebido do formulário",
+          "media_type": "image" | "video",
+          "image_urls": []
+        }
+      ]
     }
   ]
-}`;
+}
+
+- Um público pode ter MAIS DE UM criativo em "creatives" (várias ads no mesmo conjunto) — retorne um item por criativo recebido do formulário, na mesma ordem, preservando media_type
+- Posicionamento (targeting.publisher_platforms/facebook_positions/instagram_positions/etc.), optimization_goal, billing_event e destination_type são recalculados DETERMINISTICAMENTE pelo sistema depois — pode devolver valores placeholder nesses campos, eles serão sobrescritos`;
 
 export const TOOL_LABELS: Record<string, string> = {
   upload_image: "Fazendo upload das imagens...",
@@ -93,16 +99,19 @@ export const MOCK_PLAN = {
           { name: "Compras online", keyword: "online shopping" },
         ],
       },
-      creative: {
-        name: "Criativo — Público 1",
-        title: "Descubra nossa nova coleção",
-        body: "Aproveite os melhores produtos com frete grátis para todo o Brasil!",
-        description: "Frete grátis",
-        call_to_action_type: "LEARN_MORE",
-        link: "https://exemplo.com",
-        page_id: "000000000000000",
-        image_urls: [],
-      },
+      creatives: [
+        {
+          name: "Criativo — Público 1",
+          title: "Descubra nossa nova coleção",
+          body: "Aproveite os melhores produtos com frete grátis para todo o Brasil!",
+          description: "Frete grátis",
+          call_to_action_type: "LEARN_MORE",
+          link: "https://exemplo.com",
+          page_id: "000000000000000",
+          media_type: "image",
+          image_urls: [],
+        },
+      ],
     },
   ],
 };

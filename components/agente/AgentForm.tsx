@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Building2, Megaphone, Users, LayoutGrid,
+  Building2, Megaphone, Users,
   ChevronDown, ChevronUp, Send, AlertCircle, Upload, Wand2, X as XIcon,
   Plus, Trash2, Images, Copy,
 } from "lucide-react";
@@ -14,10 +14,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { ImageUpload } from "./ImageUpload";
+import { VideoUpload } from "./VideoUpload";
 import { ImageGenerator } from "./ImageGenerator";
 import { FacebookPageSelect } from "./FacebookPageSelect";
 import { cn } from "@/lib/utils";
-import type { BusinessManager, AdAccount, AgentFormData, AudienceCreative, AudienceImage } from "@/types";
+import type {
+  BusinessManager, AdAccount, AgentFormData, AudienceCreative, AudienceCreativeItem,
+  AudienceImage, PlacementSelection, AdObjective, AdCta,
+} from "@/types";
 
 interface AgentFormProps {
   businessManagers: BusinessManager[];
@@ -44,19 +48,131 @@ const CTA_OPTIONS = [
   { value: "GET_QUOTE", label: "Solicitar Orçamento" },
 ] as const;
 
-const MANUAL_PLACEMENT_OPTIONS = [
-  { value: "facebook_feed", label: "Facebook Feed" },
-  { value: "instagram_feed", label: "Instagram Feed" },
-  { value: "instagram_stories", label: "Instagram Stories" },
-  { value: "facebook_reels", label: "Facebook Reels" },
-  { value: "instagram_reels", label: "Instagram Reels" },
-  { value: "facebook_stories", label: "Facebook Stories" },
-  { value: "facebook_marketplace", label: "Marketplace" },
+// "Meta de Desempenho" — só aparece para Engajamento/Vendas quando o conjunto tem
+// conversão por mensagens habilitada. O optimization_goal de cada valor é resolvido
+// deterministicamente no servidor (app/api/agente/route.ts, PERFORMANCE_GOALS) e foi
+// confirmado contra a API real (validate_only) — exceto "leads por mensagens", que ainda
+// não tem optimization_goal confirmado pra Engajamento (testei 3 candidatos, a Meta
+// rejeitou os 3) e por isso não aparece aqui. Ver nota em PERFORMANCE_GOALS no route.ts.
+const PERFORMANCE_GOAL_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  OUTCOME_ENGAGEMENT: [
+    { value: "conversations", label: "Maximizar o número de conversas" },
+    { value: "link_clicks", label: "Maximizar o número de cliques no link" },
+  ],
+  OUTCOME_SALES: [
+    { value: "conversions", label: "Maximizar o número de conversões" },
+    { value: "conversations", label: "Maximizar o número de conversas" },
+    { value: "link_clicks", label: "Maximizar o número de cliques no link" },
+  ],
+};
+
+// Posicionamento manual — MESMO agrupamento visual do Ads Manager real (Feeds / Stories,
+// Status e Reels / In-stream / Pesquisa / Apps e sites), pra bater com o que o cliente vê
+// ao conferir a campanha lá. Cada item tem field=posição real (verificada via validate_only
+// contra a API, 2026-07-02) ou "whatsapp"/"threads" pros dois casos que são só plataforma
+// (sem posição própria selecionável). Dependências entre posições (ex: "Explorar" exigir
+// "Feed do Instagram") são resolvidas sozinhas no servidor — aqui é só a lista do que
+// existe de verdade (removi valores que testei e a Meta rejeitou: video_feeds e
+// facebook_business_explore pro Facebook, sponsored_messages pro Messenger).
+type RealPositionField = "facebook_positions" | "instagram_positions" | "messenger_positions" | "audience_network_positions";
+
+interface PlacementItem {
+  key: string;
+  label: string;
+  platform: string;
+  field: RealPositionField | "whatsapp" | "threads";
+  value?: string; // presente quando field é uma posição real
+}
+
+const PLACEMENT_GROUPS: Array<{ label: string; items: PlacementItem[] }> = [
+  {
+    label: "Feeds",
+    items: [
+      { key: "fb-feed", label: "Feed do Facebook", platform: "facebook", field: "facebook_positions", value: "feed" },
+      { key: "fb-profile", label: "Feed do perfil do Facebook", platform: "facebook", field: "facebook_positions", value: "profile_feed" },
+      { key: "ig-feed", label: "Feed do Instagram", platform: "instagram", field: "instagram_positions", value: "stream" },
+      { key: "fb-marketplace", label: "Facebook Marketplace", platform: "facebook", field: "facebook_positions", value: "marketplace" },
+      { key: "fb-rhc", label: "Coluna da direita do Facebook", platform: "facebook", field: "facebook_positions", value: "right_hand_column" },
+      { key: "ig-explore", label: "Explorar do Instagram", platform: "instagram", field: "instagram_positions", value: "explore" },
+      { key: "ig-explore-home", label: "Início do Explorar do Instagram", platform: "instagram", field: "instagram_positions", value: "explore_home" },
+      { key: "fb-notification", label: "Notificações do Facebook", platform: "facebook", field: "facebook_positions", value: "notification" },
+      { key: "threads-feed", label: "Feed do Threads", platform: "threads", field: "threads" },
+    ],
+  },
+  {
+    label: "Stories, Status e Reels",
+    items: [
+      { key: "ig-story", label: "Instagram Stories", platform: "instagram", field: "instagram_positions", value: "story" },
+      { key: "fb-story", label: "Facebook Stories", platform: "facebook", field: "facebook_positions", value: "story" },
+      { key: "msg-story", label: "Messenger Stories", platform: "messenger", field: "messenger_positions", value: "story" },
+      { key: "ig-reels", label: "Instagram Reels", platform: "instagram", field: "instagram_positions", value: "reels" },
+      { key: "fb-reels", label: "Facebook Reels", platform: "facebook", field: "facebook_positions", value: "facebook_reels" },
+      { key: "wa-status", label: "Status do WhatsApp", platform: "whatsapp", field: "whatsapp" },
+    ],
+  },
+  {
+    label: "Anúncios in-stream para Reels",
+    items: [
+      { key: "fb-instream", label: "Vídeo in-stream (Facebook)", platform: "facebook", field: "facebook_positions", value: "instream_video" },
+    ],
+  },
+  {
+    label: "Resultados de pesquisa",
+    items: [
+      { key: "fb-search", label: "Pesquisa do Facebook", platform: "facebook", field: "facebook_positions", value: "search" },
+      { key: "ig-search", label: "Pesquisa do Instagram", platform: "instagram", field: "instagram_positions", value: "ig_search" },
+    ],
+  },
+  {
+    label: "Apps e sites / Messenger",
+    items: [
+      { key: "an-classic", label: "Audience Network", platform: "audience_network", field: "audience_network_positions", value: "classic" },
+      { key: "an-rewarded", label: "Vídeo recompensado", platform: "audience_network", field: "audience_network_positions", value: "rewarded_video" },
+      { key: "msg-home", label: "Caixa de entrada do Messenger", platform: "messenger", field: "messenger_positions", value: "messenger_home" },
+    ],
+  },
 ];
+
+function isPlacementChecked(value: PlacementSelection, item: PlacementItem): boolean {
+  if (item.field === "whatsapp" || item.field === "threads") return value.platforms.includes(item.field);
+  return ((value[item.field] as string[] | undefined) ?? []).includes(item.value!);
+}
+
+// Marcar/desmarcar um item SEMPRE mantém `platforms` em sincronia com as posições
+// escolhidas (nunca fica uma plataforma marcada sem nenhuma posição real, nem uma
+// posição sem a plataforma correspondente) — elimina a classe de bug de "marquei mas
+// não veio" por inconsistência de estado.
+function togglePlacementItem(value: PlacementSelection, item: PlacementItem): PlacementSelection {
+  if (item.field === "whatsapp" || item.field === "threads") {
+    const has = value.platforms.includes(item.field);
+    return { ...value, platforms: has ? value.platforms.filter((p) => p !== item.field) : [...value.platforms, item.field] };
+  }
+  const current = (value[item.field] as string[] | undefined) ?? [];
+  const has = current.includes(item.value!);
+  const next = has ? current.filter((v) => v !== item.value) : [...current, item.value!];
+  const platforms = next.length > 0
+    ? (value.platforms.includes(item.platform) ? value.platforms : [...value.platforms, item.platform])
+    : value.platforms.filter((p) => p !== item.platform);
+  return { ...value, [item.field]: next, platforms };
+}
 
 // id determinístico (evita mismatch de hidratação)
 let _uid = 0;
-const uid = () => `aud-${++_uid}`;
+const uid = () => `id-${++_uid}`;
+
+function makeCreativeItem(): AudienceCreativeItem {
+  return {
+    id: uid(),
+    name: "",
+    media_type: "image",
+    images: [],
+    headline: "",
+    primary_text: "",
+    description: "",
+    cta: "LEARN_MORE",
+    destination_url: "",
+  };
+}
 
 function makeAudience(): AudienceCreative {
   return {
@@ -66,13 +182,30 @@ function makeAudience(): AudienceCreative {
     age_min: 18,
     age_max: 65,
     genders: ["all"],
-    headline: "",
-    primary_text: "",
-    description: "",
-    cta: "LEARN_MORE",
-    destination_url: "",
-    images: [],
+    messaging_enabled: false,
+    messaging_channels: { whatsapp: false, messenger: false, instagram: false },
+    performance_goal: "",
+    placement: { mode: "automatic", platforms: [] },
+    creatives: [makeCreativeItem()],
   };
+}
+
+// Máscara "+55 (98) 98464-8307" enquanto digita. Armazena o valor já mascarado —
+// a normalização pra Meta (só dígitos, pro link wa.me) acontece em applyDeterministicConfig
+// (app/api/agente/route.ts), que já faz `.replace(/\D/g, "")` antes de usar.
+function formatWhatsAppInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 13); // DDI(2) + DDD(2) + número(até 9)
+  const ddi = digits.slice(0, 2);
+  const ddd = digits.slice(2, 4);
+  const rest = digits.slice(4);
+
+  let out = ddi ? `+${ddi}` : "";
+  if (ddd) out += ` (${ddd})`;
+  if (rest) {
+    const splitAt = rest.length >= 9 ? 5 : 4;
+    out += rest.length > splitAt ? ` ${rest.slice(0, splitAt)}-${rest.slice(splitAt)}` : ` ${rest}`;
+  }
+  return out;
 }
 
 function nowLocal(): string {
@@ -91,8 +224,6 @@ const defaultForm: AgentFormData = {
   budget_amount: 50,
   start_date: nowLocal(),
   end_date: "",
-  placements: "automatic",
-  manual_placements: [],
   audiences: [makeAudience()],
 };
 
@@ -157,40 +288,403 @@ function FieldRow({ label, children, hint, required }: { label: string; children
   );
 }
 
-function buildImagePrompt(a: AudienceCreative, campaignName: string): string {
+function buildImagePrompt(c: AudienceCreativeItem, campaignName: string, audienceDescription: string): string {
   const parts = [
-    a.headline && `"${a.headline}"`,
+    c.headline && `"${c.headline}"`,
     campaignName && `campanha: ${campaignName}`,
-    a.primary_text && a.primary_text.slice(0, 80),
-    a.audience_description && a.audience_description.slice(0, 60),
+    c.primary_text && c.primary_text.slice(0, 80),
+    audienceDescription && audienceDescription.slice(0, 60),
   ].filter(Boolean);
   if (parts.length === 0) return "";
   return `Foto profissional para anúncio de mídia social: ${parts.join(". ")}. Fundo limpo e moderno, sem texto na imagem, fotorrealista, iluminação de estúdio.`;
 }
 
-// ── Subcard de Público + Criativo ──────────────────────────────────────────────
+// ── Posicionamento (por público) ────────────────────────────────────────────────
+
+function PlacementPicker({ value, onChange, disabled }: {
+  value: PlacementSelection;
+  onChange: (v: PlacementSelection) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          { value: "automatic" as const, label: "Automático", desc: "Meta otimiza (Advantage+)" },
+          { value: "manual" as const, label: "Manual", desc: "Você escolhe onde aparece" },
+        ].map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            onClick={() => onChange({ ...value, mode: p.value })}
+            disabled={disabled}
+            className={cn(
+              "flex flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition-all",
+              value.mode === p.value
+                ? "border-meta-blue bg-meta-blue/5 ring-1 ring-meta-blue/30"
+                : "border-border hover:border-meta-blue/40"
+            )}
+          >
+            <span className="text-xs font-medium">{p.label}</span>
+            <span className="text-[10px] text-muted-foreground">{p.desc}</span>
+          </button>
+        ))}
+      </div>
+
+      {value.mode === "manual" && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-muted-foreground italic">
+            Dependências entre posicionamentos (ex: Explorar do Instagram exigir o Feed do Instagram) são resolvidas automaticamente.
+          </p>
+          {PLACEMENT_GROUPS.map((group) => (
+            <div key={group.label} className="rounded-lg border border-border/60 p-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{group.label}</p>
+              <div className="grid grid-cols-2 gap-1">
+                {group.items.map((item) => (
+                  <label key={item.key} className="flex items-center gap-1.5 cursor-pointer py-0.5">
+                    <Checkbox
+                      checked={isPlacementChecked(value, item)}
+                      onCheckedChange={() => onChange(togglePlacementItem(value, item))}
+                      disabled={disabled}
+                    />
+                    <span className="text-[11px] text-muted-foreground">{item.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Conversão por mensagens (por público, Engajamento/Vendas) ──────────────────────
+
+function MessagingConfig({ objective, audience, onChange, disabled }: {
+  objective: AdObjective;
+  audience: AudienceCreative;
+  onChange: (partial: Partial<AudienceCreative>) => void;
+  disabled?: boolean;
+}) {
+  const goals = PERFORMANCE_GOAL_OPTIONS[objective] ?? [];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          checked={audience.messaging_enabled}
+          onCheckedChange={(checked) => onChange({ messaging_enabled: !!checked })}
+          disabled={disabled}
+        />
+        <span className="text-xs font-medium">Conversão = Destino das Mensagens (WhatsApp/Messenger/Instagram)</span>
+      </label>
+
+      {audience.messaging_enabled && (
+        <div className="ml-6 space-y-2.5 pt-1">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+              Canais (destino manual)
+            </p>
+            <div className="flex items-center gap-3">
+              {([
+                { key: "whatsapp" as const, label: "WhatsApp" },
+                { key: "messenger" as const, label: "Messenger" },
+                { key: "instagram" as const, label: "Instagram" },
+              ]).map((ch) => (
+                <label key={ch.key} className="flex items-center gap-1.5 cursor-pointer">
+                  <Checkbox
+                    checked={audience.messaging_channels[ch.key]}
+                    onCheckedChange={(checked) =>
+                      onChange({ messaging_channels: { ...audience.messaging_channels, [ch.key]: !!checked } })
+                    }
+                    disabled={disabled}
+                  />
+                  <span className="text-xs">{ch.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <FieldRow label="Meta de Desempenho">
+            <Select value={audience.performance_goal} onValueChange={(v) => onChange({ performance_goal: v })}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+              <SelectContent>
+                {goals.map((g) => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bloco de um criativo (imagem única/carrossel OU vídeo único) ────────────────────
+
+interface CreativeItemBlockProps {
+  creative: AudienceCreativeItem;
+  index: number;
+  total: number;
+  campaignName: string;
+  audienceDescription: string;
+  objective: AdObjective;
+  attempted: boolean;
+  disabled?: boolean;
+  onChange: (partial: Partial<AudienceCreativeItem>) => void;
+  onRemove: () => void;
+}
+
+function CreativeItemBlock({
+  creative, index, total, campaignName, audienceDescription, objective, attempted, disabled, onChange, onRemove,
+}: CreativeItemBlockProps) {
+  // Engajamento não precisa de link de destino (a Meta ainda exige um `link` internamente,
+  // mas o sistema cai pra URL da Página do Facebook sozinho se o campo ficar vazio).
+  const destinationUrlRequired = objective !== "OUTCOME_ENGAGEMENT";
+  const [imageMode, setImageMode] = useState<"upload" | "generate">("upload");
+  const c = creative;
+  const err = (cond: boolean) => attempted && cond;
+
+  const addImage = (img: AudienceImage) => onChange({ images: [...c.images, img] });
+  const removeImage = (idx: number) => onChange({ images: c.images.filter((_, i) => i !== idx) });
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-background p-2.5 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-muted-foreground">
+          Criativo {index + 1}{total > 1 ? ` de ${total}` : ""}
+        </span>
+        {total > 1 && (
+          <Button
+            type="button" variant="ghost" size="icon"
+            className="h-6 w-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onRemove} disabled={disabled} title="Remover criativo"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+
+      <FieldRow label="Nome do Criativo" required hint="Identifica esse anúncio no Ads Manager — não herda o nome do conjunto">
+        <Input
+          value={c.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          placeholder="Ex: Banner Promoção Verão — Variante A"
+          className={cn("h-9 text-sm", err(!c.name.trim()) && "border-destructive")}
+        />
+      </FieldRow>
+
+      <div className="flex rounded-lg border border-border p-0.5 bg-muted/30 w-fit">
+        {([
+          { value: "image" as const, label: "Imagem" },
+          { value: "video" as const, label: "Vídeo" },
+        ]).map((m) => (
+          <button
+            key={m.value}
+            type="button"
+            onClick={() => onChange({ media_type: m.value })}
+            className={cn(
+              "rounded-md px-3 py-1 text-xs font-medium transition-all",
+              c.media_type === m.value ? "bg-meta-blue text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+            )}
+            disabled={disabled}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {c.media_type === "image" ? (
+        <div className="space-y-2">
+          {c.images.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {c.images.map((img, i) => (
+                <div key={i} className="relative rounded-lg overflow-hidden border border-border group/img">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.preview} alt={`Imagem ${i + 1}`} className="w-full h-20 object-cover" />
+                  <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{i + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    disabled={disabled}
+                    className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover/img:opacity-100 hover:bg-destructive"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex rounded-lg border border-border p-0.5 bg-background">
+            {([
+              { value: "upload" as const, label: "Upload", icon: <Upload className="h-3.5 w-3.5" /> },
+              { value: "generate" as const, label: "Prompt para IA", icon: <Wand2 className="h-3.5 w-3.5" /> },
+            ]).map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setImageMode(m.value)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                  imageMode === m.value ? "bg-meta-blue text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+                disabled={disabled}
+              >
+                {m.icon}{m.label}
+              </button>
+            ))}
+          </div>
+
+          {imageMode === "upload" ? (
+            <ImageUpload
+              imageUrl={null}
+              onUpload={(url, preview) => addImage({ url, preview })}
+              onClear={() => {}}
+              disabled={disabled}
+            />
+          ) : (
+            <ImageGenerator
+              initialPrompt={buildImagePrompt(c, campaignName, audienceDescription)}
+              onAccept={(url, preview) => addImage({ url, preview: preview || url })}
+              disabled={disabled}
+            />
+          )}
+
+          {err(c.images.length === 0) && (
+            <p className="text-xs text-destructive flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />Adicione ao menos uma imagem
+            </p>
+          )}
+          <p className="text-[11px] text-muted-foreground">1 imagem = imagem única · 2 ou mais = carrossel</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          <div>
+            <p className="text-[11px] text-muted-foreground mb-1">Vídeo</p>
+            <VideoUpload
+              videoUrl={c.video?.url ?? null}
+              onUpload={(url, preview) => onChange({ video: { url, preview } })}
+              onClear={() => onChange({ video: undefined })}
+              disabled={disabled}
+            />
+            {err(!c.video) && (
+              <p className="text-xs text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-3 w-3" />Envie o vídeo</p>
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] text-muted-foreground mb-1">Capa do vídeo (obrigatória)</p>
+            <ImageUpload
+              imageUrl={c.video_thumbnail?.url ?? null}
+              onUpload={(url, preview) => onChange({ video_thumbnail: { url, preview } })}
+              onClear={() => onChange({ video_thumbnail: undefined })}
+              disabled={disabled}
+            />
+            {err(!c.video_thumbnail) && (
+              <p className="text-xs text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-3 w-3" />Envie uma imagem de capa</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <FieldRow label="Título" required hint="Máximo 40 caracteres">
+        <div className="relative">
+          <Input
+            value={c.headline}
+            onChange={(e) => onChange({ headline: e.target.value.slice(0, 40) })}
+            placeholder="Ex: Descubra nossa nova coleção"
+            className={cn("h-9 text-sm pr-12", err(!c.headline.trim()) && "border-destructive")}
+          />
+          <span className={cn("absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tabular-nums", c.headline.length > 35 ? "text-warning" : "text-muted-foreground")}>
+            {c.headline.length}/40
+          </span>
+        </div>
+      </FieldRow>
+
+      <FieldRow label="Texto Principal" required hint="Máximo 125 caracteres">
+        <div className="relative">
+          <Textarea
+            value={c.primary_text}
+            onChange={(e) => onChange({ primary_text: e.target.value.slice(0, 125) })}
+            placeholder="Ex: Aproveite os melhores produtos com frete grátis!"
+            rows={2}
+            className={cn("text-sm pr-16", err(!c.primary_text.trim()) && "border-destructive")}
+          />
+          <span className={cn("absolute right-3 top-3 text-[11px] tabular-nums", c.primary_text.length > 110 ? "text-warning" : "text-muted-foreground")}>
+            {c.primary_text.length}/125
+          </span>
+        </div>
+      </FieldRow>
+
+      <FieldRow label="Descrição" hint="Máximo 30 caracteres (opcional)">
+        <div className="relative">
+          <Input
+            value={c.description}
+            onChange={(e) => onChange({ description: e.target.value.slice(0, 30) })}
+            placeholder="Ex: Frete grátis"
+            className="h-9 text-sm pr-12"
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground tabular-nums">
+            {c.description.length}/30
+          </span>
+        </div>
+      </FieldRow>
+
+      <div className="grid grid-cols-2 gap-2">
+        <FieldRow label="Botão (CTA)">
+          <Select value={c.cta} onValueChange={(v) => onChange({ cta: v as AdCta })}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CTA_OPTIONS.map((ct) => <SelectItem key={ct.value} value={ct.value}>{ct.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+        <FieldRow
+          label="URL de Destino"
+          required={destinationUrlRequired}
+          hint={destinationUrlRequired ? undefined : "Opcional em Engajamento — sem preencher, usa a própria Página do Facebook"}
+        >
+          <Input
+            value={c.destination_url}
+            onChange={(e) => onChange({ destination_url: e.target.value })}
+            placeholder="https://..."
+            className={cn("h-9 text-sm", destinationUrlRequired && err(!c.destination_url.trim()) && "border-destructive")}
+          />
+        </FieldRow>
+      </div>
+    </div>
+  );
+}
+
+// ── Subcard de Público (conjunto de anúncios) ──────────────────────────────────────
 
 interface AudienceCardProps {
   audience: AudienceCreative;
   index: number;
   total: number;
   campaignName: string;
+  objective: AdObjective;
   attempted: boolean;
   disabled?: boolean;
   onChange: (partial: Partial<AudienceCreative>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
-  onAddImage: (img: AudienceImage) => void;
-  onRemoveImage: (imgIndex: number) => void;
 }
 
 function AudienceCard({
-  audience, index, total, campaignName, attempted, disabled,
-  onChange, onRemove, onDuplicate, onAddImage, onRemoveImage,
+  audience, index, total, campaignName, objective, attempted, disabled,
+  onChange, onRemove, onDuplicate,
 }: AudienceCardProps) {
-  const [imageMode, setImageMode] = useState<"upload" | "generate">("upload");
   const a = audience;
   const err = (cond: boolean) => attempted && cond;
+  const showMessaging = objective === "OUTCOME_ENGAGEMENT" || objective === "OUTCOME_SALES";
+
+  const updateCreative = (creativeId: string, partial: Partial<AudienceCreativeItem>) =>
+    onChange({ creatives: a.creatives.map((c) => (c.id === creativeId ? { ...c, ...partial } : c)) });
+
+  const addCreative = () => onChange({ creatives: [...a.creatives, makeCreativeItem()] });
+  const removeCreative = (creativeId: string) =>
+    onChange({ creatives: a.creatives.filter((c) => c.id !== creativeId) });
 
   return (
     <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
@@ -201,12 +695,10 @@ function AudienceCard({
             {index + 1}
           </div>
           <span className="text-sm font-semibold">Público {index + 1}</span>
-          {a.images.length > 0 && (
-            <Badge variant="outline" className="text-[10px] gap-1">
-              <Images className="h-2.5 w-2.5" />
-              {a.images.length > 1 ? `Carrossel · ${a.images.length}` : "Imagem única"}
-            </Badge>
-          )}
+          <Badge variant="outline" className="text-[10px] gap-1">
+            <Images className="h-2.5 w-2.5" />
+            {a.creatives.length} criativo{a.creatives.length !== 1 ? "s" : ""}
+          </Badge>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -305,132 +797,50 @@ function AudienceCard({
 
       <div className="border-t border-border/50 pt-3" />
 
-      {/* ── Criativo ── */}
-      <FieldRow label="Imagens do Criativo" required hint="1 imagem = imagem única · 2 ou mais = carrossel">
-        {a.images.length > 0 && (
-          <div className="grid grid-cols-3 gap-2 mb-2">
-            {a.images.map((img, i) => (
-              <div key={i} className="relative rounded-lg overflow-hidden border border-border group/img">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img.preview} alt={`Imagem ${i + 1}`} className="w-full h-20 object-cover" />
-                <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{i + 1}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveImage(i)}
-                  disabled={disabled}
-                  className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover/img:opacity-100 hover:bg-destructive"
-                >
-                  <XIcon className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
+      {showMessaging && (
+        <MessagingConfig objective={objective} audience={a} onChange={onChange} disabled={disabled} />
+      )}
+
+      <div>
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          Posicionamento
+        </p>
+        <PlacementPicker value={a.placement} onChange={(placement) => onChange({ placement })} disabled={disabled} />
+        {err(a.placement.mode === "manual" && a.placement.platforms.length === 0) && (
+          <p className="text-xs text-destructive mt-1">Selecione ao menos uma plataforma</p>
         )}
+      </div>
 
-        <div className="space-y-2">
-          <div className="flex rounded-lg border border-border p-0.5 bg-background">
-            {([
-              { value: "upload" as const, label: "Upload", icon: <Upload className="h-3.5 w-3.5" /> },
-              { value: "generate" as const, label: "Prompt para IA", icon: <Wand2 className="h-3.5 w-3.5" /> },
-            ]).map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setImageMode(m.value)}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
-                  imageMode === m.value ? "bg-meta-blue text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-                disabled={disabled}
-              >
-                {m.icon}{m.label}
-              </button>
-            ))}
-          </div>
-
-          {imageMode === "upload" ? (
-            <ImageUpload
-              imageUrl={null}
-              onUpload={(url, preview) => onAddImage({ url, preview })}
-              onClear={() => {}}
-              disabled={disabled}
-            />
-          ) : (
-            <ImageGenerator
-              initialPrompt={buildImagePrompt(a, campaignName)}
-              onAccept={(url, preview) => onAddImage({ url, preview: preview || url })}
-              disabled={disabled}
-            />
-          )}
-        </div>
-
-        {err(a.images.length === 0) && (
-          <p className="text-xs text-destructive flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" />Adicione ao menos uma imagem
-          </p>
-        )}
-      </FieldRow>
-
-      <FieldRow label="Título" required hint="Máximo 40 caracteres">
-        <div className="relative">
-          <Input
-            value={a.headline}
-            onChange={(e) => onChange({ headline: e.target.value.slice(0, 40) })}
-            placeholder="Ex: Descubra nossa nova coleção"
-            className={cn("h-9 text-sm pr-12", err(!a.headline.trim()) && "border-destructive")}
+      <div className="border-t border-border/50 pt-3 space-y-2">
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+          Criativos ({a.creatives.length})
+        </p>
+        {a.creatives.map((c, i) => (
+          <CreativeItemBlock
+            key={c.id}
+            creative={c}
+            index={i}
+            total={a.creatives.length}
+            campaignName={campaignName}
+            audienceDescription={a.audience_description}
+            objective={objective}
+            attempted={attempted}
+            disabled={disabled}
+            onChange={(partial) => updateCreative(c.id, partial)}
+            onRemove={() => removeCreative(c.id)}
           />
-          <span className={cn("absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tabular-nums", a.headline.length > 35 ? "text-warning" : "text-muted-foreground")}>
-            {a.headline.length}/40
-          </span>
-        </div>
-      </FieldRow>
-
-      <FieldRow label="Texto Principal" required hint="Máximo 125 caracteres">
-        <div className="relative">
-          <Textarea
-            value={a.primary_text}
-            onChange={(e) => onChange({ primary_text: e.target.value.slice(0, 125) })}
-            placeholder="Ex: Aproveite os melhores produtos com frete grátis!"
-            rows={2}
-            className={cn("text-sm pr-16", err(!a.primary_text.trim()) && "border-destructive")}
-          />
-          <span className={cn("absolute right-3 top-3 text-[11px] tabular-nums", a.primary_text.length > 110 ? "text-warning" : "text-muted-foreground")}>
-            {a.primary_text.length}/125
-          </span>
-        </div>
-      </FieldRow>
-
-      <FieldRow label="Descrição" hint="Máximo 30 caracteres (opcional)">
-        <div className="relative">
-          <Input
-            value={a.description}
-            onChange={(e) => onChange({ description: e.target.value.slice(0, 30) })}
-            placeholder="Ex: Frete grátis"
-            className="h-9 text-sm pr-12"
-          />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground tabular-nums">
-            {a.description.length}/30
-          </span>
-        </div>
-      </FieldRow>
-
-      <div className="grid grid-cols-2 gap-2">
-        <FieldRow label="Botão (CTA)">
-          <Select value={a.cta} onValueChange={(v) => onChange({ cta: v as AudienceCreative["cta"] })}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CTA_OPTIONS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </FieldRow>
-        <FieldRow label="URL de Destino" required>
-          <Input
-            value={a.destination_url}
-            onChange={(e) => onChange({ destination_url: e.target.value })}
-            placeholder="https://..."
-            className={cn("h-9 text-sm", err(!a.destination_url.trim()) && "border-destructive")}
-          />
-        </FieldRow>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full h-8 gap-1.5 text-xs border-dashed"
+          onClick={addCreative}
+          disabled={disabled}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Adicionar criativo
+        </Button>
       </div>
     </div>
   );
@@ -493,7 +903,13 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
         ...source,
         id: uid(),
         genders: [...source.genders],
-        images: source.images.map((img) => ({ ...img })),
+        messaging_channels: { ...source.messaging_channels },
+        placement: { ...source.placement, platforms: [...source.placement.platforms] },
+        creatives: source.creatives.map((c) => ({
+          ...c,
+          id: uid(),
+          images: c.images.map((img) => ({ ...img })),
+        })),
       };
       const next = [...prev.audiences];
       next.splice(index + 1, 0, copy);
@@ -503,49 +919,33 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
   const removeAudience = (id: string) =>
     setForm((prev) => ({ ...prev, audiences: prev.audiences.filter((a) => a.id !== id) }));
 
-  const addImage = (id: string, img: AudienceImage) =>
-    setForm((prev) => ({
-      ...prev,
-      audiences: prev.audiences.map((a) => (a.id === id ? { ...a, images: [...a.images, img] } : a)),
-    }));
-
-  const removeImage = (id: string, imgIndex: number) =>
-    setForm((prev) => ({
-      ...prev,
-      audiences: prev.audiences.map((a) =>
-        a.id === id ? { ...a, images: a.images.filter((_, i) => i !== imgIndex) } : a
-      ),
-    }));
-
-  const togglePlacement = (value: string) =>
-    setForm((prev) => {
-      const current = prev.manual_placements ?? [];
-      return {
-        ...prev,
-        manual_placements: current.includes(value)
-          ? current.filter((v) => v !== value)
-          : [...current, value],
-      };
-    });
-
   // ── Validação ──
-  const audienceValid = (a: AudienceCreative) =>
-    !!a.audience_description.trim() && !!a.locations.trim() && a.images.length > 0 &&
-    !!a.headline.trim() && !!a.primary_text.trim() && !!a.destination_url.trim();
+  const creativeValid = (c: AudienceCreativeItem) => {
+    const hasMedia = c.media_type === "video" ? (!!c.video && !!c.video_thumbnail) : c.images.length > 0;
+    const destinationUrlOk = form.objective === "OUTCOME_ENGAGEMENT" || !!c.destination_url.trim();
+    return !!c.name.trim() && hasMedia && !!c.headline.trim() && !!c.primary_text.trim() && destinationUrlOk;
+  };
 
-  // Leads via Click-to-WhatsApp exige número do WhatsApp + ID da página
-  const leadsWhatsAppOk =
-    form.objective !== "OUTCOME_LEADS" ||
-    (!!form.whatsapp_number?.trim() && !!form.facebook_page_id?.trim());
+  const audienceValid = (a: AudienceCreative) =>
+    !!a.audience_description.trim() && !!a.locations.trim() &&
+    a.creatives.length > 0 && a.creatives.every(creativeValid) &&
+    (!a.messaging_enabled || (
+      (a.messaging_channels.whatsapp || a.messaging_channels.messenger || a.messaging_channels.instagram) &&
+      !!a.performance_goal
+    )) &&
+    (a.placement.mode !== "manual" || a.placement.platforms.length > 0);
+
+  // Número do WhatsApp é sempre opcional (Leads clássico OU canal WhatsApp na conversão
+  // por mensagens) — sem ele, a Meta usa o número padrão já conectado à página.
+  const anyAudienceNeedsWhatsApp = form.audiences.some((a) => a.messaging_enabled && a.messaging_channels.whatsapp);
 
   const isSection1Done = form.account_ids.length > 0 && !!form.facebook_page_id?.trim();
   const isSection2Done =
     !!form.campaign_name.trim() && form.budget_amount > 0 && !!form.start_date &&
-    (form.budget_type !== "total" || !!form.end_date) && leadsWhatsAppOk;
+    (form.budget_type !== "total" || !!form.end_date);
   const isSection3Done = form.audiences.length > 0 && form.audiences.every(audienceValid);
 
-  const isValid = isSection1Done && isSection2Done && isSection3Done &&
-    (form.placements !== "manual" || (form.manual_placements ?? []).length > 0);
+  const isValid = isSection1Done && isSection2Done && isSection3Done;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -559,6 +959,8 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
       else setOpenSection(3);
     }
   };
+
+  const showWhatsAppField = form.objective === "OUTCOME_LEADS" || anyAudienceNeedsWhatsApp;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
@@ -644,19 +1046,23 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
           </Select>
         </FieldRow>
 
-        {form.objective === "OUTCOME_LEADS" && (
+        {showWhatsAppField && (
           <FieldRow
             label="Número do WhatsApp"
-            required
-            hint="Leads via Click-to-WhatsApp. Com DDI e DDD (ex: 55 98 8464-8307). Exige também o ID da Página do Facebook (Seção 1), com o WhatsApp conectado à página."
+            hint={
+              form.objective === "OUTCOME_LEADS"
+                ? "Opcional — Leads via Click-to-WhatsApp. Se deixar em branco, a Meta usa o número padrão já conectado à página. Precisa já estar vinculado ao WhatsApp Business da conta."
+                : "Opcional — usado pelo(s) público(s) com canal WhatsApp habilitado (Seção 3). Se deixar em branco, a Meta usa o número padrão já conectado à página. Precisa já estar vinculado ao WhatsApp Business da conta."
+            }
           >
             <Input
               value={form.whatsapp_number ?? ""}
-              onChange={(e) => set("whatsapp_number", e.target.value)}
-              placeholder="Ex: 55 98 8464-8307"
-              className={cn("h-9 text-sm", attempted && !form.whatsapp_number?.trim() && "border-destructive")}
+              onChange={(e) => set("whatsapp_number", formatWhatsAppInput(e.target.value))}
+              placeholder="+55 (98) 98464-8307"
+              inputMode="numeric"
+              className="h-9 text-sm"
             />
-            {attempted && !form.facebook_page_id?.trim() && (
+            {form.objective === "OUTCOME_LEADS" && attempted && !form.facebook_page_id?.trim() && (
               <p className="text-xs text-destructive">
                 Preencha o ID da Página do Facebook na Seção 1 — obrigatório para leads no WhatsApp.
               </p>
@@ -719,7 +1125,7 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
         )}
       </FormSection>
 
-      {/* Section 3: Públicos & Criativos */}
+      {/* Section 3: Públicos, Conversão, Posicionamento & Criativos */}
       <FormSection
         icon={<Users className="h-3.5 w-3.5" />}
         title={`Públicos & Criativos${form.audiences.length > 1 ? ` (${form.audiences.length})` : ""}`}
@@ -729,7 +1135,8 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
         completed={isSection3Done}
       >
         <p className="text-[11px] text-muted-foreground -mt-1">
-          Cada público tem seu próprio criativo. Adicione mais de uma imagem em um público para criar um carrossel.
+          Cada público é um conjunto de anúncios: tem seu próprio posicionamento e pode ter vários criativos
+          (imagem única, carrossel ou vídeo).
         </p>
 
         <div className="space-y-3">
@@ -740,13 +1147,12 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
               index={i}
               total={form.audiences.length}
               campaignName={form.campaign_name}
+              objective={form.objective}
               attempted={attempted}
               disabled={disabled}
               onChange={(partial) => updateAudience(a.id, partial)}
               onRemove={() => removeAudience(a.id)}
               onDuplicate={() => duplicateAudience(a.id)}
-              onAddImage={(img) => addImage(a.id, img)}
-              onRemoveImage={(idx) => removeImage(a.id, idx)}
             />
           ))}
         </div>
@@ -762,59 +1168,6 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
           <Plus className="h-3.5 w-3.5" />
           Adicionar outro público
         </Button>
-      </FormSection>
-
-      {/* Section 4: Posicionamentos */}
-      <FormSection
-        icon={<LayoutGrid className="h-3.5 w-3.5" />}
-        title="Posicionamentos"
-        step={4}
-        open={openSection === 4}
-        onToggle={() => setOpenSection(openSection === 4 ? 0 : 4)}
-        completed={false}
-      >
-        <FieldRow label="Tipo de Posicionamento">
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { value: "automatic", label: "Automático", desc: "Meta otimiza os posicionamentos (Advantage+)" },
-              { value: "manual", label: "Manual", desc: "Escolha onde seu anúncio vai aparecer" },
-            ].map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => set("placements", p.value as "automatic" | "manual")}
-                className={cn(
-                  "flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition-all",
-                  form.placements === p.value
-                    ? "border-meta-blue bg-meta-blue/5 ring-1 ring-meta-blue/30"
-                    : "border-border hover:border-meta-blue/40"
-                )}
-              >
-                <span className="text-sm font-medium">{p.label}</span>
-                <span className="text-[11px] text-muted-foreground">{p.desc}</span>
-              </button>
-            ))}
-          </div>
-        </FieldRow>
-
-        {form.placements === "manual" && (
-          <FieldRow label="Posicionamentos Manuais">
-            <div className="grid grid-cols-2 gap-2">
-              {MANUAL_PLACEMENT_OPTIONS.map((p) => (
-                <label key={p.value} className="flex items-center gap-2 cursor-pointer py-1">
-                  <Checkbox
-                    checked={(form.manual_placements ?? []).includes(p.value)}
-                    onCheckedChange={() => togglePlacement(p.value)}
-                  />
-                  <span className="text-sm">{p.label}</span>
-                </label>
-              ))}
-            </div>
-            {attempted && form.placements === "manual" && (form.manual_placements ?? []).length === 0 && (
-              <p className="text-xs text-destructive">Selecione ao menos um posicionamento</p>
-            )}
-          </FieldRow>
-        )}
       </FormSection>
 
       {/* Submit */}
