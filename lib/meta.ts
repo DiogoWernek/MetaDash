@@ -452,6 +452,12 @@ export async function fetchAdVideoMetrics(
 ): Promise<MetaInsightsRaw | null> {
   const fields = [
     "spend",
+    "impressions",
+    "clicks",
+    "ctr",
+    "cpm",
+    "reach",
+    "frequency",
     "video_play_actions",
     "video_p25_watched_actions",
     "video_p50_watched_actions",

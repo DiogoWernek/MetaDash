@@ -5,7 +5,7 @@ import { ComposableMap, Geographies, Geography } from "react-simple-maps";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MapPin } from "lucide-react";
+import { MapPin, ChevronDown, ChevronRight } from "lucide-react";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/utils";
 import type { GeoData, GeoDataItem } from "@/types";
 
@@ -58,6 +58,7 @@ export function GeoMap({ geoData, loading }: GeoMapProps) {
   const [hoveredCode, setHoveredCode] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [accentColor, setAccentColor] = useState("#1e40af");
+  const [expandedCode, setExpandedCode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Load Africa TopoJSON once (bundled locally in /public/geo/)
@@ -155,7 +156,7 @@ export function GeoMap({ geoData, loading }: GeoMapProps) {
         {loading ? (
           <Skeleton className="h-72 w-full rounded-lg" />
         ) : (
-          <div className="flex gap-4">
+          <div ref={containerRef} className="relative flex gap-4">
             {/* ── Left: ranked list ── */}
             <div className="w-[42%] shrink-0 space-y-0.5">
               <div className="mb-2 flex items-center justify-between px-1">
@@ -177,45 +178,73 @@ export function GeoMap({ geoData, loading }: GeoMapProps) {
                     const barPct = maxSpend > 0 ? (item.spend / maxSpend) * 100 : 0;
                     const share = totalSpend > 0 ? (item.spend / totalSpend) * 100 : 0;
                     const isActive = hoveredCode === item.code;
+                    const hasCampaigns = view === "brazil" && !!item.campaigns?.length;
+                    const isExpanded = expandedCode === item.code;
 
                     return (
-                      <div
-                        key={item.code}
-                        className={`rounded-md px-1.5 py-1 transition-colors cursor-default ${isActive ? "bg-meta-blue/10" : "hover:bg-muted/50"}`}
-                        onMouseEnter={() => setHoveredCode(item.code)}
-                        onMouseLeave={() => setHoveredCode(null)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="w-7 shrink-0 rounded bg-blue-50 dark:bg-blue-950/60 px-1 py-0.5 text-center text-[10px] font-bold text-meta-blue leading-tight">
-                            {item.code}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1 mb-0.5">
-                              <span className={`text-[11px] font-medium truncate ${isActive ? "text-meta-blue" : ""}`}>
-                                {item.name}
-                              </span>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-[11px] font-semibold tabular-nums">
-                                  {formatCurrency(item.spend)}
+                      <div key={item.code}>
+                        <div
+                          className={`rounded-md px-1.5 py-1 transition-colors ${hasCampaigns ? "cursor-pointer" : "cursor-default"} ${isActive ? "bg-meta-blue/10" : "hover:bg-muted/50"}`}
+                          onMouseEnter={(e) => {
+                            setHoveredCode(item.code);
+                            const rect = containerRef.current?.getBoundingClientRect();
+                            if (rect) setTooltip({ item, x: e.clientX - rect.left, y: e.clientY - rect.top });
+                          }}
+                          onMouseMove={(e) => {
+                            const rect = containerRef.current?.getBoundingClientRect();
+                            if (rect) setTooltip((p) => (p ? { ...p, x: e.clientX - rect.left, y: e.clientY - rect.top } : null));
+                          }}
+                          onMouseLeave={() => { setHoveredCode(null); setTooltip(null); }}
+                          onClick={() => hasCampaigns && setExpandedCode(isExpanded ? null : item.code)}
+                        >
+                          <div className="flex items-center gap-2">
+                            {hasCampaigns ? (
+                              isExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <span className="w-3 shrink-0" />
+                            )}
+                            <span className="w-7 shrink-0 rounded bg-blue-50 dark:bg-blue-950/60 px-1 py-0.5 text-center text-[10px] font-bold text-meta-blue leading-tight">
+                              {item.code}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1 mb-0.5">
+                                <span className={`text-[11px] font-medium truncate ${isActive ? "text-meta-blue" : ""}`}>
+                                  {item.name}
                                 </span>
-                                <span className="text-[10px] text-muted-foreground tabular-nums w-9 text-right">
-                                  {share.toFixed(1)}%
-                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="text-[11px] font-semibold tabular-nums">
+                                    {formatCurrency(item.spend)}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground tabular-nums w-9 text-right">
+                                    {share.toFixed(1)}%
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                            <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full transition-all duration-200"
-                                style={{
-                                  width: `${barPct}%`,
-                                  background: isActive
-                                    ? accentColor
-                                    : "linear-gradient(to right, rgb(147,197,253), rgb(30,64,175))",
-                                }}
-                              />
+                              <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full transition-all duration-200"
+                                  style={{
+                                    width: `${barPct}%`,
+                                    background: isActive
+                                      ? accentColor
+                                      : "linear-gradient(to right, rgb(147,197,253), rgb(30,64,175))",
+                                  }}
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
+
+                        {isExpanded && hasCampaigns && (
+                          <div className="ml-8 mb-1 space-y-0.5 border-l border-border pl-2">
+                            {item.campaigns!.map((c) => (
+                              <div key={c.campaign_id} className="flex items-center justify-between gap-2 py-0.5 text-[10px]">
+                                <span className="truncate text-muted-foreground">{c.campaign_name}</span>
+                                <span className="shrink-0 font-mono font-medium">{formatCurrency(c.spend)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -231,7 +260,7 @@ export function GeoMap({ geoData, loading }: GeoMapProps) {
             </div>
 
             {/* ── Right: map + legend ── */}
-            <div ref={containerRef} className="relative flex-1 select-none flex flex-col">
+            <div className="flex-1 select-none flex flex-col">
               {/* Map */}
               <div className="flex-1">
                 {view === "brazil" && (

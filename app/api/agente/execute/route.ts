@@ -4,6 +4,8 @@ import {
   uploadAdImage,
   uploadAdVideo,
   waitForVideoReady,
+  getAutoVideoThumbnail,
+  getInstagramAccountId,
   searchInterests,
   createCampaign,
   createAdset,
@@ -128,9 +130,7 @@ export async function POST(req: NextRequest) {
               .insert({
                 account_id: formData.account_ids[0] ?? dbId ?? null,
                 form_data: formData,
-                image_url: formData.audiences[0]?.creatives[0]?.images[0]?.url
-                  ?? formData.audiences[0]?.creatives[0]?.video_thumbnail?.url
-                  ?? null,
+                image_url: formData.audiences[0]?.creatives[0]?.images[0]?.url ?? null,
                 status: "running",
                 started_at: new Date().toISOString(),
               })
@@ -152,6 +152,18 @@ export async function POST(req: NextRequest) {
           lifetime_budget: plan.campaign.lifetime_budget ?? undefined,
         });
         send({ type: "step", step: "create_campaign", status: "done", label: "Campanha criada", value: campaignId, group_id: CAMPAIGN_GROUP });
+
+        // Conta do Instagram vinculada a cada Página — buscada uma vez por page_id e
+        // reutilizada em todos os criativos. Sem isso, o campo "Perfil do Instagram" some
+        // no Gerenciador em qualquer criativo com posicionamento manual incluindo Instagram.
+        const instagramAccountCache = new Map<string, string | undefined>();
+        async function resolveInstagramUserId(pageId: string): Promise<string | undefined> {
+          if (!pageId) return undefined;
+          if (!instagramAccountCache.has(pageId)) {
+            instagramAccountCache.set(pageId, await getInstagramAccountId(pageId, token));
+          }
+          return instagramAccountCache.get(pageId);
+        }
 
         const adsetResults: ExecuteAdsetResult[] = [];
 
@@ -216,8 +228,9 @@ export async function POST(req: NextRequest) {
                 const videoId = await uploadAdVideo(metaAccountId, token, creative.video_url ?? "");
                 send({ type: "step", step: "upload_media", status: "start", label: `Processando vídeo na Meta${tag}...`, group_id: gid });
                 await waitForVideoReady(videoId, token);
+                const thumbnailUrl = await getAutoVideoThumbnail(videoId, token);
                 send({ type: "step", step: "upload_media", status: "done", label: `Vídeo pronto${tag}`, value: videoId, group_id: gid });
-                media = { type: "video", video_id: videoId, thumbnail_url: creative.video_thumbnail_url ?? "" };
+                media = { type: "video", video_id: videoId, thumbnail_url: thumbnailUrl };
               } else {
                 send({ type: "step", step: "upload_media", status: "start", label: `Enviando ${creative.image_urls.length} imagem(ns)${tag}...`, group_id: gid });
                 const imageHashes: string[] = [];
@@ -233,9 +246,11 @@ export async function POST(req: NextRequest) {
               const isCarousel = media.type === "image" && media.image_hashes.length > 1;
               currentStep = "create_creative";
               send({ type: "step", step: "create_creative", status: "start", label: `${isVideo ? "Criando criativo de vídeo" : isCarousel ? "Criando criativo em carrossel" : "Criando criativo do anúncio"}${tag}...`, group_id: gid });
+              const instagramUserId = await resolveInstagramUserId(creative.page_id);
               const creativeId = await createAdCreative(metaAccountId, token, {
                 name: creative.name,
                 page_id: creative.page_id,
+                instagram_user_id: instagramUserId,
                 media,
                 title: creative.title,
                 body: creative.body,

@@ -142,6 +142,28 @@ export async function waitForVideoReady(
   throw new Error("Timeout aguardando a Meta processar o vídeo");
 }
 
+// video_data exige image_hash ou image_url (code 100, subcode 1443226) — a Meta NÃO aceita
+// vídeo sem capa, mesmo que gere uma automaticamente para exibição no Ads Manager. Por isso
+// buscamos a própria capa auto-gerada pela Meta (thumbnails do vídeo) em vez de exigir upload
+// manual do usuário. Pequeno retry pois as thumbnails podem levar um instante a mais que o
+// status "ready" para ficarem disponíveis.
+export async function getAutoVideoThumbnail(videoId: string, token: string): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await metaGet(videoId, token, { fields: "thumbnails{uri,width,height}" });
+      const thumbs = (res.thumbnails as { data?: Array<{ uri: string; width: number; height: number }> } | undefined)?.data ?? [];
+      if (thumbs.length > 0) {
+        const largest = thumbs.reduce((a, b) => (b.width > a.width ? b : a));
+        return largest.uri;
+      }
+    } catch {
+      // ignora e tenta de novo
+    }
+    if (attempt < 2) await sleep(2000);
+  }
+  throw new Error("Não foi possível obter a capa automática do vídeo");
+}
+
 // Search interests → returns [{id, name}]
 // IMPORTANTE: o endpoint de busca da Meta devolve campos extras
 // (audience_size_lower_bound, audience_size_upper_bound, path, topic…).
@@ -383,9 +405,25 @@ export async function createAdset(
   }
 }
 
+// Conta do Instagram vinculada à Página — SEM isso, "Perfil do Instagram" fica em branco
+// no Gerenciador de Anúncios pra qualquer criativo com posicionamento manual incluindo
+// Instagram (confirmado 2026-07-02: a Meta exige instagram_user_id em object_story_spec
+// pra ads "Instagram only ou mixed placement"; sem ele, o campo de perfil fica vazio na UI
+// mesmo o anúncio publicando normalmente). Em posicionamento automático a Meta preenche
+// sozinha, por isso o bug só aparecia nos testes com posicionamento manual do cliente.
+export async function getInstagramAccountId(pageId: string, token: string): Promise<string | undefined> {
+  try {
+    const json = await metaGet(pageId, token, { fields: "instagram_business_account{id}" });
+    const igAccount = json.instagram_business_account as { id?: string } | undefined;
+    return igAccount?.id;
+  } catch {
+    return undefined;
+  }
+}
+
 export type CreativeMedia =
   | { type: "image"; image_hashes: string[] }   // 1 = imagem única, 2+ = carrossel
-  | { type: "video"; video_id: string; thumbnail_url: string };
+  | { type: "video"; video_id: string; thumbnail_url?: string }; // ver getAutoVideoThumbnail — a Meta exige image_url/image_hash em video_data, mas ele vem da própria capa auto-gerada pela Meta, não de upload do usuário
 
 // Create ad creative → returns creative_id
 // media.type="image", 1 hash  → criativo de imagem única
@@ -397,6 +435,7 @@ export async function createAdCreative(
   params: {
     name: string;
     page_id: string;
+    instagram_user_id?: string;
     media: CreativeMedia;
     title: string;
     body: string;
@@ -424,12 +463,14 @@ export async function createAdCreative(
 
   // CTA só é enviado quando há um destino real (link ou WhatsApp).
   // Em engajamento, omitir call_to_action → post limpo, só curtir/comentar/compartilhar.
+  // WHATSAPP_MESSAGE não aceita "link" dentro de value (code 105, subcode 1815630) —
+  // o destino real é controlado pelo destination_type/promoted_object do adset.
   const callToAction = isEngagement
     ? undefined
     : {
         type: params.call_to_action_type,
         value: isWhatsApp
-          ? { app_destination: "WHATSAPP", link: destLink }
+          ? { app_destination: "WHATSAPP" }
           : { link: params.link },
       };
 
@@ -438,9 +479,12 @@ export async function createAdCreative(
   if (params.media.type === "video") {
     objectStorySpec = {
       page_id: params.page_id,
+      ...(params.instagram_user_id ? { instagram_user_id: params.instagram_user_id } : {}),
       video_data: {
         video_id: params.media.video_id,
-        image_url: params.media.thumbnail_url,
+        // image_url é obrigatório pra Meta (code 100, subcode 1443226) — sempre preenchido
+        // pelo chamador via getAutoVideoThumbnail antes de chegar aqui.
+        ...(params.media.thumbnail_url ? { image_url: params.media.thumbnail_url } : {}),
         title: params.title,
         message: params.body,
         link_description: params.description,
@@ -475,7 +519,11 @@ export async function createAdCreative(
         call_to_action: callToAction,
       };
     }
-    objectStorySpec = { page_id: params.page_id, link_data: linkData };
+    objectStorySpec = {
+      page_id: params.page_id,
+      ...(params.instagram_user_id ? { instagram_user_id: params.instagram_user_id } : {}),
+      link_data: linkData,
+    };
   }
 
   const res = await metaPost(`${accountId}/adcreatives`, token, {

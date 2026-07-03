@@ -571,18 +571,7 @@ function CreativeItemBlock({
             {err(!c.video) && (
               <p className="text-xs text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-3 w-3" />Envie o vídeo</p>
             )}
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground mb-1">Capa do vídeo (obrigatória)</p>
-            <ImageUpload
-              imageUrl={c.video_thumbnail?.url ?? null}
-              onUpload={(url, preview) => onChange({ video_thumbnail: { url, preview } })}
-              onClear={() => onChange({ video_thumbnail: undefined })}
-              disabled={disabled}
-            />
-            {err(!c.video_thumbnail) && (
-              <p className="text-xs text-destructive flex items-center gap-1 mt-1"><AlertCircle className="h-3 w-3" />Envie uma imagem de capa</p>
-            )}
+            <p className="text-[11px] text-muted-foreground mt-1">A Meta seleciona a capa automaticamente a partir do vídeo</p>
           </div>
         </div>
       )}
@@ -922,7 +911,7 @@ export function AgentForm({ businessManagers, adAccounts, onSubmit, disabled, in
 
   // ── Validação ──
   const creativeValid = (c: AudienceCreativeItem) => {
-    const hasMedia = c.media_type === "video" ? (!!c.video && !!c.video_thumbnail) : c.images.length > 0;
+    const hasMedia = c.media_type === "video" ? !!c.video : c.images.length > 0;
     const destinationUrlOk = form.objective === "OUTCOME_ENGAGEMENT" || !!c.destination_url.trim();
     return !!c.name.trim() && hasMedia && !!c.headline.trim() && !!c.primary_text.trim() && destinationUrlOk;
   };

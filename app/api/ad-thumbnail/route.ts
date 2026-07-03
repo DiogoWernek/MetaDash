@@ -26,6 +26,24 @@ export async function GET(request: NextRequest) {
 
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
+
+    // ── 1. Cache — a imagem de um anúncio não muda depois de criado ──────────
+    const { data: cached } = await supabaseAdmin
+      .from("ad_thumbnail_cache")
+      .select("thumbnail_url, image_url, is_video")
+      .eq("ad_id", metaAdId)
+      .limit(1);
+
+    if (cached && cached.length > 0) {
+      const row = cached[0];
+      return NextResponse.json({
+        thumbnail_url: row.thumbnail_url ?? undefined,
+        image_url: row.image_url ?? undefined,
+        is_video: !!row.is_video,
+      } satisfies AdThumbnailData);
+    }
+
+    // ── 2. Cache miss → busca ao vivo (até 3 chamadas à Graph API) ───────────
     const { fetchAdCreative } = await import("@/lib/meta");
 
     const { data: accounts, error } = await supabaseAdmin
@@ -41,11 +59,24 @@ export async function GET(request: NextRequest) {
     const { access_token, meta_account_id } = accounts[0];
     const creative = await fetchAdCreative(metaAdId, access_token, meta_account_id);
 
-    return NextResponse.json({
+    const result: AdThumbnailData = {
       thumbnail_url: creative?.thumbnail_url,
       image_url: creative?.image_url,
       is_video: !!creative?.video_id,
-    } satisfies AdThumbnailData);
+    };
+
+    // Grava no cache em background — não bloqueia a resposta
+    supabaseAdmin
+      .from("ad_thumbnail_cache")
+      .upsert(
+        { ad_id: metaAdId, account_id: accountId, ...result, cached_at: new Date().toISOString() },
+        { onConflict: "ad_id" }
+      )
+      .then(({ error: upsertErr }) => {
+        if (upsertErr) console.error("[ad-thumbnail] Erro ao gravar cache:", upsertErr);
+      });
+
+    return NextResponse.json(result);
   } catch (err) {
     console.error("[ad-thumbnail] Error:", err);
     return NextResponse.json({ error: "Falha ao carregar thumbnail" }, { status: 500 });

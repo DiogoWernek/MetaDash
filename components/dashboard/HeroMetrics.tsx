@@ -1,12 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
-import { TrendingUp, TrendingDown, DollarSign, Users, TrendingUp as RevenueIcon, Info } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Users, Wallet, Info, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCurrency, formatNumber, formatVariation } from "@/lib/utils";
 import type { DailyInsight } from "@/types";
+import type { AccountBalance } from "@/app/api/balance/route";
+
+const LOW_BALANCE_THRESHOLD = 100;
+const LOW_BALANCE_ACCOUNT_NAME = "BM Saúde";
 
 interface CardDef {
   label: string;
@@ -24,8 +28,8 @@ interface HeroMetricsProps {
   insights: DailyInsight[];
   previousInsights: DailyInsight[];
   loading?: boolean;
-  crmRevenue?: number;
-  crmRevenuePrev?: number;
+  balances?: AccountBalance[];
+  balancesLoading?: boolean;
 }
 
 function sumInsights(insights: DailyInsight[]) {
@@ -36,15 +40,21 @@ function sumInsights(insights: DailyInsight[]) {
   };
 }
 
-export function HeroMetrics({ insights, previousInsights, loading, crmRevenue, crmRevenuePrev }: HeroMetricsProps) {
+export function HeroMetrics({ insights, previousInsights, loading, balances = [], balancesLoading }: HeroMetricsProps) {
   const current = useMemo(() => sumInsights(insights), [insights]);
   const previous = useMemo(() => sumInsights(previousInsights), [previousInsights]);
-  const hasCrm = crmRevenue !== undefined && crmRevenue > 0;
+  const lowBalanceAccounts = useMemo(
+    () => balances.filter((b) => b.name === LOW_BALANCE_ACCOUNT_NAME && b.is_prepay && b.value < LOW_BALANCE_THRESHOLD),
+    [balances]
+  );
+
+  const cardCount = 2 + balances.length;
+  const gridCols = cardCount >= 4 ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3";
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[0, 1, 2].map((i) => (
+      <div className={`grid grid-cols-1 gap-4 ${gridCols}`}>
+        {Array.from({ length: Math.max(cardCount, 3) }).map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardContent className="p-6">
               <Skeleton className="h-4 w-28 mb-4" />
@@ -56,6 +66,20 @@ export function HeroMetrics({ insights, previousInsights, loading, crmRevenue, c
       </div>
     );
   }
+
+  const balanceCards: CardDef[] = balances.map((b) => ({
+    label: b.is_prepay ? `Saldo — ${b.name}` : `Saldo — ${b.name}`,
+    tooltip: b.is_prepay
+      ? "Estimativa do saldo pré-pago disponível (a Meta não expõe esse valor de forma exata via API — pode divergir alguns % do Gerenciador de Pagamentos). Buscado em tempo real."
+      : "Valor já gasto desde a última cobrança, que será debitado do cartão/boleto cadastrado. Buscado em tempo real.",
+    value: balancesLoading ? "…" : formatCurrency(b.value),
+    prev: 0,
+    curr: b.value,
+    icon: Wallet,
+    color: b.is_prepay && b.value < LOW_BALANCE_THRESHOLD ? "text-danger" : b.is_prepay ? "text-emerald-500" : "text-amber-500",
+    bg: b.is_prepay && b.value < LOW_BALANCE_THRESHOLD ? "bg-danger/10" : b.is_prepay ? "bg-emerald-500/10" : "bg-amber-500/10",
+    higherIsBetter: b.is_prepay,
+  }));
 
   const cards: CardDef[] = [
     {
@@ -78,23 +102,21 @@ export function HeroMetrics({ insights, previousInsights, loading, crmRevenue, c
       bg: "bg-violet-500/10",
       higherIsBetter: true,
     },
-    {
-      label: hasCrm ? "Faturamento (CRM)" : "Faturamento (Pixel)",
-      tooltip: hasCrm
-        ? "Faturamento real do CRM Kommo — soma dos negócios ganhos no período."
-        : "Valor de compra reportado pelo pixel/Conversions API (action_values.purchase). Para faturamento real do CRM é necessária integração separada.",
-      value: formatCurrency(hasCrm ? (crmRevenue ?? 0) : current.revenue),
-      prev: hasCrm ? (crmRevenuePrev ?? 0) : previous.revenue,
-      curr: hasCrm ? (crmRevenue ?? 0) : current.revenue,
-      icon: RevenueIcon,
-      color: hasCrm ? "text-cyan-500" : "text-emerald-500",
-      bg: hasCrm ? "bg-cyan-500/10" : "bg-emerald-500/10",
-      higherIsBetter: true,
-    },
+    ...balanceCards,
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className="space-y-3">
+      {lowBalanceAccounts.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-4 py-2.5 text-sm text-danger">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            Saldo baixo em <strong>{LOW_BALANCE_ACCOUNT_NAME}</strong>: {formatCurrency(lowBalanceAccounts[0].value)} disponível
+            (abaixo de {formatCurrency(LOW_BALANCE_THRESHOLD)}). Recarregue para evitar pausa nos anúncios.
+          </span>
+        </div>
+      )}
+      <div className={`grid grid-cols-1 gap-4 ${gridCols}`}>
       {cards.map((card) => {
         const variation = formatVariation(card.curr, card.prev);
         const isPositive = card.higherIsBetter ? variation.positive : !variation.positive;
@@ -142,6 +164,7 @@ export function HeroMetrics({ insights, previousInsights, loading, crmRevenue, c
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }

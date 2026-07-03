@@ -1,9 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { KommoDashboardData } from "@/lib/kommo";
+import type { CrmDashboardData, KommoLeadCached } from "@/lib/kommo";
 
-const EMPTY: KommoDashboardData = {
-  totalLeads: 0, totalMatriculas: 0, totalLost: 0, totalRevenue: 0, cpa: 0,
-  byStage: [], byCourse: [], bySource: [], byDay: [],
+const PAGE_SIZE = 1000;
+
+// O Supabase (PostgREST) trunca .select() em 1000 linhas por padrão — com dezenas de
+// milhares de leads numa janela de 90 dias, um select sem paginação undercount silenciosamente
+// (foi exatamente isso: só 203 de ~10mil leads da Triagem apareciam). Pagina até esgotar.
+async function fetchAllLeads(
+  supabaseAdmin: typeof import("@/lib/supabase").supabaseAdmin,
+  from: string,
+  to: string
+): Promise<KommoLeadCached[]> {
+  const all: KommoLeadCached[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from("kommo_leads_cache")
+      .select("lead_id,price,status_id,status_name,pipeline_id,is_won,is_lost,course,source,entrada_prospeccao,setor,motivo_perda,submotivo_perda,created_date")
+      .gte("created_date", from)
+      .lte("created_date", to)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as KommoLeadCached[]));
+    if (data.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return all;
+}
+
+const EMPTY: CrmDashboardData = {
+  cpa: 0, cpl: 0, totalLeadsGerados: 0, totalMatriculas: 0, totalRevenue: 0,
+  aquisicao: { totalLeads: 0, avgPerDay: 0, topSource: "—", byOrigin: [], byCourse: [], byEntradaProspeccao: [], byMotivoPerda: [], bySubmotivoPerda: [] },
+  comercial: { byChannel: [], matriculasByOrigin: [], perdasByOrigin: [], byLeadsSetor: [] },
 };
 
 export async function GET(request: NextRequest) {
@@ -26,24 +56,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(EMPTY);
   }
 
-  const defaultTicketPrice = process.env.KOMMO_DEFAULT_TICKET_PRICE
-    ? parseFloat(process.env.KOMMO_DEFAULT_TICKET_PRICE)
-    : 0;
-
   try {
     const { supabaseAdmin } = await import("@/lib/supabase");
-    const { buildDashboardFromCache } = await import("@/lib/kommo");
+    const { buildCrmDashboard } = await import("@/lib/kommo");
 
-    const { data: cached, error } = await supabaseAdmin
-      .from("kommo_leads_cache")
-      .select("lead_id,price,status_id,status_name,is_won,is_lost,course,source,created_date")
-      .gte("created_date", from)
-      .lte("created_date", to);
+    const cached = await fetchAllLeads(supabaseAdmin, from, to);
 
-    if (error) throw error;
-
-    if (cached && cached.length > 0) {
-      return NextResponse.json(buildDashboardFromCache(cached, spend, defaultTicketPrice));
+    if (cached.length > 0) {
+      return NextResponse.json(buildCrmDashboard(cached, spend, from, to));
     }
 
     return NextResponse.json(EMPTY);

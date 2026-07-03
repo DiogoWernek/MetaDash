@@ -204,6 +204,14 @@ export interface FilterState {
   dateRange: DateRange;
 }
 
+export interface GeoCampaignRow {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+}
+
 export interface GeoDataItem {
   code: string;
   name: string;
@@ -212,6 +220,7 @@ export interface GeoDataItem {
   clicks: number;
   ctr: number;
   cpm: number;
+  campaigns?: GeoCampaignRow[]; // só preenchido para Brasil (por estado)
 }
 
 export interface GeoData {
@@ -305,7 +314,6 @@ export interface AudienceCreativeItem {
   media_type: "image" | "video";
   images: AudienceImage[];          // media_type="image": 1 = imagem única, 2+ = carrossel
   video?: AudienceImage;            // media_type="video"
-  video_thumbnail?: AudienceImage;  // media_type="video" — capa exigida pela Meta (video_data.image_url)
   headline: string;
   primary_text: string;
   description: string;
@@ -425,7 +433,6 @@ export interface AdPlanCreative {
   media_type: "image" | "video";
   image_urls: string[];        // media_type="image": 1 = imagem única, 2+ = carrossel
   video_url?: string;          // media_type="video" — origem a ser enviada para /advideos
-  video_thumbnail_url?: string; // media_type="video" — capa (video_data.image_url)
   whatsapp_link?: string;      // destino do CTA quando call_to_action_type = WHATSAPP_MESSAGE
 }
 

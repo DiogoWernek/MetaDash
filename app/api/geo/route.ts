@@ -75,19 +75,20 @@ async function handleReal(accountIds: string[], startDate: string, endDate: stri
     const { data: accounts, error } = await supabaseAdmin.from("ad_accounts").select("*").in("id", accountIds);
     if (error) throw error;
 
-    const brazilAcc: Record<string, { spend: number; impressions: number; clicks: number }> = {};
+    const brazilAcc: Record<string, { spend: number; impressions: number; clicks: number; campaigns: Map<string, { campaign_name: string; spend: number; impressions: number; clicks: number }> }> = {};
     const africaAcc: Record<string, { spend: number; impressions: number; clicks: number }> = {};
 
     await Promise.all(
       (accounts ?? []).map(async (account) => {
         try {
-          // Brazil: breakdown by region (dimensão vem automaticamente, não vai em fields)
+          // Brazil: breakdown por região + nível campanha (pra poder listar campanhas por estado)
           const brazilData = await fetchInsights(account.meta_account_id, account.access_token, {
             since: startDate,
             until: endDate,
             timeIncrement: "all_days" as const,
+            level: "campaign",
             breakdown: "region",
-            fields: ["impressions", "clicks", "spend"],
+            fields: ["impressions", "clicks", "spend", "campaign_id", "campaign_name"],
           }).catch((e) => { console.error("[geo] Brazil region fetch error:", e?.message); return []; });
 
           console.log(`[geo] Brazil region rows for ${account.name}:`, brazilData.length, brazilData.slice(0, 2));
@@ -100,10 +101,28 @@ async function handleReal(accountIds: string[], startDate: string, endDate: stri
               if (regionName) console.log(`[geo] Unknown region: "${regionName}"`);
               continue;
             }
-            if (!brazilAcc[sigla]) brazilAcc[sigla] = { spend: 0, impressions: 0, clicks: 0 };
-            brazilAcc[sigla].spend += parseFloat((r.spend as string) || "0");
-            brazilAcc[sigla].impressions += parseInt((r.impressions as string) || "0");
-            brazilAcc[sigla].clicks += parseInt((r.clicks as string) || "0");
+            if (!brazilAcc[sigla]) brazilAcc[sigla] = { spend: 0, impressions: 0, clicks: 0, campaigns: new Map() };
+            const spend = parseFloat((r.spend as string) || "0");
+            const impressions = parseInt((r.impressions as string) || "0", 10);
+            const clicks = parseInt((r.clicks as string) || "0", 10);
+            brazilAcc[sigla].spend += spend;
+            brazilAcc[sigla].impressions += impressions;
+            brazilAcc[sigla].clicks += clicks;
+
+            const campaignId = (r.campaign_id as string) ?? "";
+            if (campaignId) {
+              const existing = brazilAcc[sigla].campaigns.get(campaignId);
+              if (existing) {
+                existing.spend += spend;
+                existing.impressions += impressions;
+                existing.clicks += clicks;
+              } else {
+                brazilAcc[sigla].campaigns.set(campaignId, {
+                  campaign_name: (r.campaign_name as string) ?? "Campanha",
+                  spend, impressions, clicks,
+                });
+              }
+            }
           }
 
           // Africa: breakdown by country (dimensão vem automaticamente)
@@ -138,6 +157,15 @@ async function handleReal(accountIds: string[], startDate: string, endDate: stri
       clicks: d.clicks,
       ctr: d.impressions > 0 ? Math.round((d.clicks / d.impressions) * 10000) / 100 : 0,
       cpm: d.impressions > 0 ? Math.round((d.spend / d.impressions) * 100000) / 100 : 0,
+      campaigns: Array.from(d.campaigns.entries())
+        .map(([campaign_id, c]) => ({
+          campaign_id,
+          campaign_name: c.campaign_name,
+          spend: Math.round(c.spend * 100) / 100,
+          impressions: c.impressions,
+          clicks: c.clicks,
+        }))
+        .sort((a, b) => b.spend - a.spend),
     })).sort((a, b) => b.spend - a.spend);
 
     const africa: GeoDataItem[] = Object.entries(africaAcc).map(([code, d]) => ({

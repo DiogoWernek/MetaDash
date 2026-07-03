@@ -18,6 +18,16 @@ export interface AdVideoData {
   avg_watch_time?: number;
 }
 
+export interface AdImageData {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpm: number;
+  reach: number;
+  frequency: number;
+}
+
 export interface AdSocialData {
   post_reactions: number;
   post_comments: number;
@@ -69,8 +79,18 @@ export async function GET(request: NextRequest) {
       follows: 18,
       profile_visits: 412,
     };
+    const image: AdImageData = {
+      spend: 1200.0,
+      impressions: 84200,
+      clicks: 1930,
+      ctr: 2.29,
+      cpm: 14.25,
+      reach: 61300,
+      frequency: 1.37,
+    };
     return NextResponse.json({
       video,
+      image,
       social,
       creative: {
         name: "Criativo — " + metaAdId,
@@ -148,6 +168,16 @@ async function handleReal(
       avg_watch_time: avgTime > 0 ? avgTime : undefined,
     };
 
+    const image: AdImageData = {
+      spend,
+      impressions: parseInt(rawInsights?.impressions ?? "0", 10) || 0,
+      clicks: parseInt(rawInsights?.clicks ?? "0", 10) || 0,
+      ctr: parseFloat(rawInsights?.ctr ?? "0") || 0,
+      cpm: parseFloat(rawInsights?.cpm ?? "0") || 0,
+      reach: parseInt(rawInsights?.reach ?? "0", 10) || 0,
+      frequency: parseFloat(rawInsights?.frequency ?? "0") || 0,
+    };
+
     const numericAccountId = meta_account_id?.replace(/^act_/, "") ?? "";
     const adsManagerUrl = numericAccountId
       ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${numericAccountId}&selected_ad_ids=${metaAdId}`
@@ -165,6 +195,7 @@ async function handleReal(
 
     return NextResponse.json({
       video,
+      image,
       social,
       creative: {
         name: creative?.name,

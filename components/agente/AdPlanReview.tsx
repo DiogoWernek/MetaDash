@@ -151,7 +151,6 @@ function buildPlanText(plan: AdPlan): string {
       lines.push(`  Page ID: ${cr.page_id || "—"}`);
       if (isVideo) {
         lines.push(`  Vídeo: ${cr.video_url || "—"}`);
-        lines.push(`  Capa: ${cr.video_thumbnail_url || "—"}`);
       } else {
         lines.push(`  ${isCarousel ? "Imagens" : "Imagem"}:`);
         cr.image_urls.forEach((url, idx) => {
@@ -446,11 +445,10 @@ export function AdPlanReview({ plan, isMock, onApprove, onBack, disabled }: AdPl
                             {isVideo ? "Vídeo" : isCarousel ? "Imagens do carrossel" : "Imagem"}
                           </p>
                           {isVideo ? (
-                            creative.video_thumbnail_url && (
+                            creative.video_url && (
                               <div className="relative rounded-lg overflow-hidden border border-border w-1/2">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={creative.video_thumbnail_url} alt="Capa do vídeo" className="w-full h-20 object-cover" />
-                                <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">Capa</span>
+                                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                                <video src={creative.video_url} className="w-full h-28 object-cover" muted controls />
                               </div>
                             )
                           ) : (

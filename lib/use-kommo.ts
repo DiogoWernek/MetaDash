@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 import { useDashboard } from "@/lib/dashboard-context";
 import { dateToString } from "@/lib/utils";
-import type { KommoDashboardData } from "@/lib/kommo";
+import type { CrmDashboardData } from "@/lib/kommo";
 
 export function useKommo() {
   const { currentFilters, insights } = useDashboard();
-  const [data, setData] = useState<KommoDashboardData | null>(null);
+  const [data, setData] = useState<CrmDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export function useKommo() {
     fetch(`/api/kommo?from=${from}&to=${to}&spend=${spend}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<KommoDashboardData>;
+        return r.json() as Promise<CrmDashboardData>;
       })
       .then((d) => setData(d))
       .catch((e: Error) => setError(e.message))

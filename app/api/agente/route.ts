@@ -17,7 +17,7 @@ const anthropic = USE_MOCK
 
 function describeCreative(c: AudienceCreativeItem, index: number): string {
   const mediaDesc = c.media_type === "video"
-    ? "Vídeo único — NÃO inclua video_url/video_thumbnail_url, o sistema preenche"
+    ? "Vídeo único — NÃO inclua video_url, o sistema preenche"
     : `${c.images.length} imagem(ns) (${c.images.length > 1 ? "carrossel" : "imagem única"}) — NÃO inclua as URLs, o sistema preenche`;
 
   return `  Criativo ${index + 1}:
@@ -98,7 +98,6 @@ function injectMedia(plan: AdPlan, formData: AgentFormData): AdPlan {
               media_type: "video" as const,
               image_urls: [],
               video_url: source.video?.url ?? "",
-              video_thumbnail_url: source.video_thumbnail?.url ?? "",
             };
           }
           return {

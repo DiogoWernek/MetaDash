@@ -45,7 +45,8 @@ function AdThumbnailCell({
       setLoading(false);
       return;
     }
-    // Stagger requests by index to avoid hammering Meta API
+    // Stagger levemente — a maioria dos hits agora resolve via cache no servidor
+    // (ad_thumbnail_cache), só o primeiro carregamento de um anúncio novo bate na Meta.
     timerRef.current = setTimeout(async () => {
       try {
         const params = new URLSearchParams({ metaAdId: adId, accountId });
@@ -60,7 +61,7 @@ function AdThumbnailCell({
       } finally {
         setLoading(false);
       }
-    }, index * 120);
+    }, index * 40);
 
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [adId, accountId, index]);

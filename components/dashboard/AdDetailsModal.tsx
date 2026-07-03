@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { X, Film, Video, Loader2, AlertCircle, ExternalLink } from "lucide-react";
+import { X, Film, Video, ImageIcon, Loader2, AlertCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCurrency, formatNumber, cn } from "@/lib/utils";
-import type { AdVideoData, AdCreativeData, AdSocialData } from "@/app/api/ad-details/route";
+import { formatCurrency, formatNumber, formatPercent, cn } from "@/lib/utils";
+import type { AdVideoData, AdImageData, AdCreativeData, AdSocialData } from "@/app/api/ad-details/route";
 
 interface AdDetailsModalProps {
   metaAdId: string;
@@ -58,6 +58,7 @@ export function AdDetailsModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [video, setVideo] = useState<AdVideoData | null>(null);
+  const [image, setImage] = useState<AdImageData | null>(null);
   const [creative, setCreative] = useState<AdCreativeData | null>(null);
   const [social, setSocial] = useState<AdSocialData | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -71,6 +72,7 @@ export function AdDetailsModal({
       if (!res.ok) throw new Error("Falha ao carregar");
       const data = await res.json();
       setVideo(data.video ?? null);
+      setImage(data.image ?? null);
       setCreative(data.creative ?? null);
       setSocial(data.social ?? null);
     } catch (e) {
@@ -92,6 +94,7 @@ export function AdDetailsModal({
   }, [onClose]);
 
   const previewSrc = creative?.thumbnail_url ?? creative?.image_url ?? null;
+  const isVideo = !!creative?.is_video;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -106,10 +109,12 @@ export function AdDetailsModal({
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-5 py-4 shrink-0">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-meta-blue/10">
-            <Video className="h-4 w-4 text-meta-blue" />
+            {isVideo ? <Video className="h-4 w-4 text-meta-blue" /> : <ImageIcon className="h-4 w-4 text-meta-blue" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Anúncio · Métricas de Vídeo &amp; Criativo</p>
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Anúncio · {isVideo ? "Métricas de Vídeo & Criativo" : "Métricas de Imagem & Criativo"}
+            </p>
             <p className="text-sm font-semibold truncate">{adName}</p>
           </div>
           <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={onClose}>
@@ -188,58 +193,79 @@ export function AdDetailsModal({
                 )}
               </div>
 
-              {/* Right: Video Metrics */}
+              {/* Right: Métricas específicas do tipo de mídia */}
               <div className="p-5 space-y-4 flex-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Métricas de Vídeo</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {isVideo ? "Métricas de Vídeo" : "Métricas do Anúncio"}
+                </p>
 
-                {video ? (
-                  <div className="space-y-1">
-                    {/* Key metrics */}
-                    <MetricRow
-                      label="ThruPlay (visualizações completas)"
-                      value={formatNumber(video.thruplay)}
-                      highlight
-                    />
-                    <MetricRow
-                      label="Custo por ThruPlay"
-                      value={video.cost_per_thruplay ? formatCurrency(video.cost_per_thruplay) : "—"}
-                    />
-                    <MetricRow
-                      label="Reproduções totais"
-                      value={formatNumber(video.video_plays)}
-                    />
-                    <MetricRow
-                      label="Custo por Reprodução"
-                      value={video.cost_per_video_play ? formatCurrency(video.cost_per_video_play) : "—"}
-                    />
-                    {video.avg_watch_time !== undefined && (
+                {isVideo ? (
+                  video ? (
+                    <div className="space-y-1">
+                      {/* Key metrics */}
                       <MetricRow
-                        label="Tempo Médio de Reprodução"
-                        value={`${video.avg_watch_time.toFixed(1)}s`}
+                        label="ThruPlay (visualizações completas)"
+                        value={formatNumber(video.thruplay)}
+                        highlight
                       />
-                    )}
+                      <MetricRow
+                        label="Custo por ThruPlay"
+                        value={video.cost_per_thruplay ? formatCurrency(video.cost_per_thruplay) : "—"}
+                      />
+                      <MetricRow
+                        label="Reproduções totais"
+                        value={formatNumber(video.video_plays)}
+                      />
+                      <MetricRow
+                        label="Custo por Reprodução"
+                        value={video.cost_per_video_play ? formatCurrency(video.cost_per_video_play) : "—"}
+                      />
+                      {video.avg_watch_time !== undefined && (
+                        <MetricRow
+                          label="Tempo Médio de Reprodução"
+                          value={`${video.avg_watch_time.toFixed(1)}s`}
+                        />
+                      )}
 
-                    {/* Quartile breakdown */}
-                    <div className="pt-2 border-t border-border/50 mt-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                        Retenção por Quartil
-                      </p>
-                      <div className="space-y-3">
-                        <ProgressBar label="25% do vídeo" pct="25%" value={video.p25} max={video.video_plays} />
-                        <ProgressBar label="50% do vídeo" pct="50%" value={video.p50} max={video.video_plays} />
-                        <ProgressBar label="75% do vídeo" pct="75%" value={video.p75} max={video.video_plays} />
-                        <ProgressBar label="100% do vídeo" pct="100%" value={video.p100} max={video.video_plays} />
+                      {/* Quartile breakdown */}
+                      <div className="pt-2 border-t border-border/50 mt-2">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                          Retenção por Quartil
+                        </p>
+                        <div className="space-y-3">
+                          <ProgressBar label="25% do vídeo" pct="25%" value={video.p25} max={video.video_plays} />
+                          <ProgressBar label="50% do vídeo" pct="50%" value={video.p50} max={video.video_plays} />
+                          <ProgressBar label="75% do vídeo" pct="75%" value={video.p75} max={video.video_plays} />
+                          <ProgressBar label="100% do vídeo" pct="100%" value={video.p100} max={video.video_plays} />
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-border/50">
+                        <MetricRow label="Gasto no período" value={formatCurrency(video.spend)} />
                       </div>
                     </div>
-
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <p className="text-xs">Nenhuma métrica de vídeo disponível para este período</p>
+                    </div>
+                  )
+                ) : image ? (
+                  <div className="space-y-1">
+                    <MetricRow label="Impressões" value={formatNumber(image.impressions)} highlight />
+                    <MetricRow label="Alcance" value={formatNumber(image.reach)} />
+                    <MetricRow label="Frequência" value={image.frequency.toFixed(2)} />
+                    <MetricRow label="Cliques" value={formatNumber(image.clicks)} />
+                    <MetricRow label="CTR" value={formatPercent(image.ctr)} />
+                    <MetricRow label="CPM" value={formatCurrency(image.cpm)} />
                     <div className="pt-2 border-t border-border/50">
-                      <MetricRow label="Gasto no período" value={formatCurrency(video.spend)} />
+                      <MetricRow label="Gasto no período" value={formatCurrency(image.spend)} />
                     </div>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    <p className="text-xs">Nenhuma métrica de vídeo disponível para este período</p>
+                    <p className="text-xs">Nenhuma métrica disponível para este período</p>
                   </div>
                 )}
               </div>

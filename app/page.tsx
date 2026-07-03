@@ -1,7 +1,7 @@
 "use client";
 
 import { useDashboard } from "@/lib/dashboard-context";
-import { useKommo } from "@/lib/use-kommo";
+import { useBalance } from "@/lib/use-balance";
 import { HeroMetrics } from "@/components/dashboard/HeroMetrics";
 import { AlertaCritico } from "@/components/dashboard/AlertaCritico";
 import { PerformancePorPeriodo } from "@/components/dashboard/PerformancePorPeriodo";
@@ -19,19 +19,20 @@ export default function VisaoGeralPage() {
     loadingInsights,
     loadingCampaigns,
   } = useDashboard();
-  const { data: kommoData } = useKommo();
+  const { balances, loading: loadingBalances } = useBalance();
 
   const loading = loadingInsights;
 
   return (
     <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
       <div className="space-y-5">
-        {/* Hero metrics: Gasto / Leads / Faturamento */}
+        {/* Hero metrics: Gasto / Leads / Saldo da Conta */}
         <HeroMetrics
           insights={insights}
           previousInsights={previousInsights}
           loading={loading}
-          crmRevenue={kommoData?.totalRevenue}
+          balances={balances}
+          balancesLoading={loadingBalances}
         />
 
         {/* Alert banner */}
