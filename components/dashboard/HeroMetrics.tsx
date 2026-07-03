@@ -6,11 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCurrency, formatNumber, formatVariation } from "@/lib/utils";
+import { LOW_BALANCE_THRESHOLD, findLowBalance } from "@/lib/balance-alerts";
 import type { DailyInsight } from "@/types";
 import type { AccountBalance } from "@/app/api/balance/route";
-
-const LOW_BALANCE_THRESHOLD = 100;
-const LOW_BALANCE_ACCOUNT_NAME = "BM Saúde";
 
 interface CardDef {
   label: string;
@@ -22,6 +20,7 @@ interface CardDef {
   color: string;
   bg: string;
   higherIsBetter: boolean;
+  alert?: string;
 }
 
 interface HeroMetricsProps {
@@ -43,10 +42,7 @@ function sumInsights(insights: DailyInsight[]) {
 export function HeroMetrics({ insights, previousInsights, loading, balances = [], balancesLoading }: HeroMetricsProps) {
   const current = useMemo(() => sumInsights(insights), [insights]);
   const previous = useMemo(() => sumInsights(previousInsights), [previousInsights]);
-  const lowBalanceAccounts = useMemo(
-    () => balances.filter((b) => b.name === LOW_BALANCE_ACCOUNT_NAME && b.is_prepay && b.value < LOW_BALANCE_THRESHOLD),
-    [balances]
-  );
+  const lowBalance = useMemo(() => findLowBalance(balances), [balances]);
 
   const cardCount = 2 + balances.length;
   const gridCols = cardCount >= 4 ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3";
@@ -79,6 +75,9 @@ export function HeroMetrics({ insights, previousInsights, loading, balances = []
     color: b.is_prepay && b.value < LOW_BALANCE_THRESHOLD ? "text-danger" : b.is_prepay ? "text-emerald-500" : "text-amber-500",
     bg: b.is_prepay && b.value < LOW_BALANCE_THRESHOLD ? "bg-danger/10" : b.is_prepay ? "bg-emerald-500/10" : "bg-amber-500/10",
     higherIsBetter: b.is_prepay,
+    alert: lowBalance && b.account_id === lowBalance.account_id
+      ? `Abaixo de ${formatCurrency(LOW_BALANCE_THRESHOLD)} — recarregue para evitar pausa nos anúncios`
+      : undefined,
   }));
 
   const cards: CardDef[] = [
@@ -107,15 +106,6 @@ export function HeroMetrics({ insights, previousInsights, loading, balances = []
 
   return (
     <div className="space-y-3">
-      {lowBalanceAccounts.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-4 py-2.5 text-sm text-danger">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>
-            Saldo baixo em <strong>{LOW_BALANCE_ACCOUNT_NAME}</strong>: {formatCurrency(lowBalanceAccounts[0].value)} disponível
-            (abaixo de {formatCurrency(LOW_BALANCE_THRESHOLD)}). Recarregue para evitar pausa nos anúncios.
-          </span>
-        </div>
-      )}
       <div className={`grid grid-cols-1 gap-4 ${gridCols}`}>
       {cards.map((card) => {
         const variation = formatVariation(card.curr, card.prev);
@@ -145,7 +135,12 @@ export function HeroMetrics({ insights, previousInsights, loading, balances = []
                 </div>
               </div>
               <p className="font-mono text-3xl font-bold tracking-tight">{card.value}</p>
-              {variation.value !== "—" ? (
+              {card.alert ? (
+                <div className="mt-2 flex items-center gap-1 text-danger">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-xs font-medium">{card.alert}</span>
+                </div>
+              ) : variation.value !== "—" ? (
                 <div className="mt-2 flex items-center gap-1">
                   {isPositive ? (
                     <TrendingUp className="h-3.5 w-3.5 text-success" />

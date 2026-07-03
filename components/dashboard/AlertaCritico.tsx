@@ -2,11 +2,15 @@
 
 import { useMemo } from "react";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
+import { LOW_BALANCE_THRESHOLD, findLowBalance } from "@/lib/balance-alerts";
 import type { DailyInsight } from "@/types";
+import type { AccountBalance } from "@/app/api/balance/route";
 
 interface AlertaCriticoProps {
   insights: DailyInsight[];
   previousInsights: DailyInsight[];
+  balances?: AccountBalance[];
   loading?: boolean;
 }
 
@@ -15,9 +19,18 @@ function pct(curr: number, prev: number) {
   return ((curr - prev) / prev) * 100;
 }
 
-export function AlertaCritico({ insights, previousInsights, loading }: AlertaCriticoProps) {
+export function AlertaCritico({ insights, previousInsights, balances = [], loading }: AlertaCriticoProps) {
   const alerts = useMemo(() => {
-    if (!insights.length || !previousInsights.length) return [];
+    const found: string[] = [];
+
+    const lowBalance = findLowBalance(balances);
+    if (lowBalance) {
+      found.push(
+        `Saldo baixo em ${lowBalance.name}: ${formatCurrency(lowBalance.value)} (abaixo de ${formatCurrency(LOW_BALANCE_THRESHOLD)}) — recarregue para evitar pausa nos anúncios`
+      );
+    }
+
+    if (!insights.length || !previousInsights.length) return found;
 
     const curr = {
       spend: insights.reduce((s, i) => s + i.spend, 0),
@@ -30,8 +43,6 @@ export function AlertaCritico({ insights, previousInsights, loading }: AlertaCri
 
     const currCpl = curr.leads > 0 ? curr.spend / curr.leads : null;
     const prevCpl = prev.leads > 0 ? prev.spend / prev.leads : null;
-
-    const found: string[] = [];
 
     const spendDelta = pct(curr.spend, prev.spend);
     if (spendDelta !== null && spendDelta > 30) {
@@ -51,7 +62,7 @@ export function AlertaCritico({ insights, previousInsights, loading }: AlertaCri
     }
 
     return found;
-  }, [insights, previousInsights]);
+  }, [insights, previousInsights, balances]);
 
   if (loading) return null;
 

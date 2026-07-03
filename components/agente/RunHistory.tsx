@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, ChevronDown, ChevronUp, ExternalLink, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { Clock, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ExternalLink, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AgentRun } from "@/types";
+
+const PAGE_SIZE = 10;
 
 const STATUS_CONFIG = {
   success: {
@@ -185,21 +187,33 @@ interface RunHistoryProps {
 export function RunHistory({ accountMap = {}, refreshKey }: RunHistoryProps) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Nova criação (refreshKey mudou) volta pra primeira página, onde ela vai aparecer.
+  useEffect(() => {
+    setPage(0);
+  }, [refreshKey]);
 
   useEffect(() => {
     setLoading(true);
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
     import("@/lib/supabase-client").then(({ getSupabaseClient }) => {
       getSupabaseClient()
         .from("agent_runs")
-        .select("*")
+        .select("*", { count: "exact" })
         .order("created_at", { ascending: false })
-        .limit(20)
-        .then(({ data }: { data: AgentRun[] | null }) => {
+        .range(from, to)
+        .then(({ data, count }: { data: AgentRun[] | null; count: number | null }) => {
           setRuns(data ?? []);
+          setTotalCount(count ?? 0);
           setLoading(false);
         });
     });
-  }, [refreshKey]);
+  }, [refreshKey, page]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   if (loading) {
     return (
@@ -231,6 +245,36 @@ export function RunHistory({ accountMap = {}, refreshKey }: RunHistoryProps) {
           accountName={accountMap[run.account_id ?? ""] ?? undefined}
         />
       ))}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-muted-foreground">
+            Página {page + 1} de {totalPages} · {totalCount} criações
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              disabled={page + 1 >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              Próxima
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

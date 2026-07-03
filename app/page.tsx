@@ -18,10 +18,17 @@ export default function VisaoGeralPage() {
     campaigns,
     loadingInsights,
     loadingCampaigns,
+    currentFilters,
   } = useDashboard();
   const { balances, loading: loadingBalances } = useBalance();
 
   const loading = loadingInsights;
+
+  // Só mostra o(s) card(s) de saldo da(s) conta(s) atualmente selecionada(s) no filtro
+  // (BM Saúde sozinha, BM Engenharia sozinha, ou as 2 quando "Todas as Contas" está ativo).
+  const visibleBalances = currentFilters
+    ? balances.filter((b) => currentFilters.selectedAccountIds.includes(b.account_id))
+    : balances;
 
   return (
     <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6">
@@ -31,7 +38,7 @@ export default function VisaoGeralPage() {
           insights={insights}
           previousInsights={previousInsights}
           loading={loading}
-          balances={balances}
+          balances={visibleBalances}
           balancesLoading={loadingBalances}
         />
 
@@ -39,6 +46,7 @@ export default function VisaoGeralPage() {
         <AlertaCritico
           insights={insights}
           previousInsights={previousInsights}
+          balances={visibleBalances}
           loading={loading}
         />
 
